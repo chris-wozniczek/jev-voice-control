@@ -1,9 +1,13 @@
 import Foundation
 
 public enum Action: String, CaseIterable, Codable {
-    case openApp, closeApp, switchApp, minimizeApp, hideApp, openURL, webSearch, dictate, system, none
+    case openApp, closeApp, switchApp, minimizeApp, maximizeApp, fullscreenApp, restoreApp
+    case hideApp, openURL, webSearch, dictate, system, none
 
-    public static let appTargeted: Set<Action> = [.openApp, .closeApp, .switchApp, .minimizeApp, .hideApp]
+    public static let appTargeted: Set<Action> = [
+        .openApp, .closeApp, .switchApp, .minimizeApp, .maximizeApp,
+        .fullscreenApp, .restoreApp, .hideApp,
+    ]
 
     public var description: String {
         switch self {
@@ -11,6 +15,9 @@ public enum Action: String, CaseIterable, Codable {
         case .closeApp: return "Close, quit, or exit an application"
         case .switchApp: return "Switch to, focus, or bring an application to the front"
         case .minimizeApp: return "Minimize an application's windows to the Dock"
+        case .maximizeApp: return "Maximize or zoom an application's window to fill the screen"
+        case .fullscreenApp: return "Put an application's window into full screen mode"
+        case .restoreApp: return "Restore, un-minimize, or bring back an application's windows"
         case .hideApp: return "Hide an application"
         case .openURL: return "Open a specific website or URL in a browser"
         case .webSearch: return "Search the web for a query"
@@ -19,6 +26,10 @@ public enum Action: String, CaseIterable, Codable {
         case .none: return "No actionable command"
         }
     }
+}
+
+public enum RiskTier: String, Codable {
+    case safe, caution, destructive
 }
 
 public enum SystemAction: String, CaseIterable, Codable {
@@ -88,5 +99,51 @@ public struct Decision {
         self.confidence = confidence
         self.latencyMs = latencyMs
         self.model = model
+    }
+
+    public var riskTier: RiskTier {
+        if action == .closeApp {
+            return .caution
+        }
+        if action == .system,
+           let systemAction,
+           [.lockScreen, .sleep].contains(systemAction) {
+            return .caution
+        }
+        return .safe
+    }
+
+    public var executionSummary: String {
+        switch action {
+        case .openApp: return "Open \(targetApp ?? "app")"
+        case .closeApp: return "Close \(targetApp ?? "app")"
+        case .switchApp: return "Switch to \(targetApp ?? "app")"
+        case .minimizeApp: return "Minimize \(targetApp ?? "app")"
+        case .maximizeApp: return "Maximize \(targetApp ?? "app")"
+        case .fullscreenApp: return "Full screen \(targetApp ?? "app")"
+        case .restoreApp: return "Restore \(targetApp ?? "app")"
+        case .hideApp: return "Hide \(targetApp ?? "app")"
+        case .openURL: return "Open \(url ?? "website")"
+        case .webSearch: return "Search for \(query ?? "query")"
+        case .dictate:
+            let value = text ?? "text"
+            return "Type “\(value)”"
+        case .system:
+            switch systemAction ?? .none {
+            case .volumeSet: return "Volume \(percent ?? 50)%"
+            case .mute: return "Mute"
+            case .unmute: return "Unmute"
+            case .volumeUp: return "Volume up"
+            case .volumeDown: return "Volume down"
+            case .lockScreen: return "Lock the screen"
+            case .sleep: return "Put the Mac to sleep"
+            case .screenshot: return "Take a screenshot"
+            case .brightnessUp: return "Brightness up"
+            case .brightnessDown: return "Brightness down"
+            case .showDesktop: return "Show the desktop"
+            case .none: return "No action"
+            }
+        case .none: return "No action"
+        }
     }
 }
