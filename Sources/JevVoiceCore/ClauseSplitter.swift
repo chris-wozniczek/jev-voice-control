@@ -144,6 +144,19 @@ public enum ClauseSplitter {
         return parts
     }
 
+    public static func stripTrailingEndWord(_ transcript: String) -> String {
+        var result = transcript.replacingOccurrences(
+            of: #"\s+(go|do it|execute|send it|over)[.!?,;]*$"#,
+            with: "",
+            options: [.regularExpression, .caseInsensitive]
+        ).trimmingCharacters(in: .whitespacesAndNewlines)
+        while let last = result.last, ",;.".contains(last) {
+            result.removeLast()
+            result = result.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        return result
+    }
+
     private static func words(in transcript: String) -> [Word] {
         let ns = transcript as NSString
         var words: [Word] = []

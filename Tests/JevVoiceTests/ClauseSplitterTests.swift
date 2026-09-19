@@ -81,4 +81,16 @@ final class ClauseSplitterCandidateTests: XCTestCase {
         let boundaries = ClauseSplitter.candidateBoundaries(transcript)
         XCTAssertEqual(ClauseSplitter.split(transcript, boundaries: boundaries), ["open chrome", "search for banana"])
     }
+
+    func testStripsTrailingEndWordAndPunctuation() {
+        XCTAssertEqual(ClauseSplitter.stripTrailingEndWord("open chrome, go!"), "open chrome")
+        XCTAssertEqual(ClauseSplitter.stripTrailingEndWord("open chrome DO IT."), "open chrome")
+        XCTAssertEqual(ClauseSplitter.stripTrailingEndWord("open chrome"), "open chrome")
+    }
+
+    func testSilenceTimeoutDefaultsAndBounds() {
+        XCTAssertEqual(HearingSettings.defaultSilenceTimeout, 2.5)
+        XCTAssertEqual(HearingSettings.constrainedSilenceTimeout(0), 1)
+        XCTAssertEqual(HearingSettings.constrainedSilenceTimeout(6), 5)
+    }
 }
