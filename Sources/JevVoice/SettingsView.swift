@@ -24,27 +24,43 @@ struct SettingsView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            HStack {
-                Text("Settings").font(.headline)
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 10) {
+                Button {
+                    controller.showSettings = false
+                } label: {
+                    Image(systemName: "chevron.left")
+                        .font(.system(size: 13, weight: .semibold))
+                }
+                .buttonStyle(.borderless)
+                .keyboardShortcut(.cancelAction)
+                Text("Settings")
+                    .font(.system(.headline, design: .rounded).weight(.semibold))
                 Spacer()
                 Button("Done") { controller.showSettings = false }
                     .controlSize(.small)
             }
+            .padding(.horizontal, 16)
+            .padding(.top, 14)
+            .padding(.bottom, 10)
+            Divider()
+            ScrollView {
+                VStack(alignment: .leading, spacing: 12) {
+                    section("TypeSafe API key", systemImage: "key") {
+                        SecureField("ts-…", text: $config.apiKey)
+                            .textFieldStyle(.roundedBorder)
+                    }
 
-            GroupBox("API key") {
-                SecureField("ts-…", text: $config.apiKey)
-                    .textFieldStyle(.roundedBorder)
-            }
+                    section("Behaviour", systemImage: "hand.raised") {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Toggle("Ask before running commands", isOn: $config.alwaysConfirm)
+                            Toggle("Speak replies", isOn: $config.speakReplies)
+                        }
+                        .toggleStyle(.switch)
+                        .controlSize(.small)
+                    }
 
-            GroupBox("Behaviour") {
-                VStack(alignment: .leading, spacing: 8) {
-                    Toggle("Ask before running commands", isOn: $config.alwaysConfirm)
-                    Toggle("Speak replies", isOn: $config.speakReplies)
-                }
-            }
-
-            GroupBox("Voice") {
+                    section("Voice", systemImage: "speaker.wave.2") {
                 VStack(alignment: .leading, spacing: 8) {
                     Picker("Voice", selection: $config.voiceIdentifier) {
                         Text("System default").tag(String?.none)
@@ -52,19 +68,21 @@ struct SettingsView: View {
                             Text(voiceLabel(voice)).tag(Optional(voice.identifier))
                         }
                     }
-                    Slider(value: $config.speechRate, in: 0.3...0.7) {
-                        Text("Speech rate")
+                    HStack {
+                        Text("Speed").font(.callout)
+                        Slider(value: $config.speechRate, in: 0.3...0.7)
+                        Button {
+                            Task { await controller.speaker.say("Hi, I'm Jev. Ready when you are.") }
+                        } label: {
+                            Label("Test", systemImage: "play.fill")
+                        }
+                        .controlSize(.small)
                     }
-                    Text("Rate \(config.speechRate, specifier: "%.2f")")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    Button("Test voice") {
-                        Task { await controller.speaker.say("Hi, I'm Jev. Ready when you are.") }
-                    }
-                    HStack(spacing: 6) {
+                    HStack(alignment: .top, spacing: 6) {
                         Text("Higher-quality voices: System Settings → Accessibility → Read & Speak → System Voice → Manage Voices")
                             .font(.caption2)
                             .foregroundStyle(.secondary)
+                        Spacer()
                         Button("Open") {
                             if let url = URL(
                                 string: "x-apple.systempreferences:com.apple.preference.universalaccess?SpokenContent"
@@ -77,8 +95,11 @@ struct SettingsView: View {
                 }
             }
 
-            GroupBox("App aliases") {
+            section("App aliases", systemImage: "textformat.abc") {
                 VStack(alignment: .leading, spacing: 6) {
+                    Text("Teach Jev what you call your apps, e.g. “see mux” → cmux.")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
                     ForEach($aliasDrafts) { $draft in
                         HStack {
                             TextField("Alias", text: $draft.alias)
@@ -105,21 +126,34 @@ struct SettingsView: View {
                         Label("Add alias", systemImage: "plus")
                     }
                     .controlSize(.small)
+                    HStack {
+                        Text("\(AppRegistry.shared.entries.count) apps known")
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
+                        Spacer()
+                        Button("Rescan apps") { AppRegistry.shared.refresh() }
+                            .controlSize(.mini)
+                    }
                 }
-                .onAppear { loadAliases() }
             }
-
-            HStack {
-                Text("\(AppRegistry.shared.entries.count) apps known")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                Spacer()
-                Button("Refresh") { AppRegistry.shared.refresh() }
-                    .controlSize(.small)
+                }
+                .padding(16)
             }
-            Spacer()
         }
         .onAppear { loadAliases() }
+    }
+
+    private func section<Content: View>(
+        _ title: String, systemImage: String, @ViewBuilder content: () -> Content
+    ) -> some View {
+        Card {
+            VStack(alignment: .leading, spacing: 10) {
+                Label(title, systemImage: systemImage)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                content()
+            }
+        }
     }
 
     private func voiceLabel(_ voice: AVSpeechSynthesisVoice) -> String {

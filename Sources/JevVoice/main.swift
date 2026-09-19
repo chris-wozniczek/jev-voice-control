@@ -16,14 +16,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         if let button = statusItem.button {
-            button.image = NSImage(systemSymbolName: "waveform", accessibilityDescription: "Jev Voice")
+            button.image = NSImage(systemSymbolName: "waveform.and.mic", accessibilityDescription: "Jev Voice")
             button.action = #selector(statusItemClicked)
             button.target = self
         }
 
         popover = NSPopover()
         popover.behavior = .transient
-        popover.contentSize = NSSize(width: 360, height: 520)
+        popover.contentSize = NSSize(width: 380, height: 540)
         popover.contentViewController = NSHostingController(
             rootView: ContentView().environmentObject(controller)
         )

@@ -175,8 +175,7 @@ enum Executor {
         if let frame = WindowControl.frame(of: window), WindowControl.isNear(frame, target) {
             return "Maximized \(name)"
         }
-        if let value = WindowControl.attribute(window, kAXZoomButtonAttribute as CFString) {
-            let button = value as! AXUIElement
+        if let button = WindowControl.element(window, kAXZoomButtonAttribute as CFString) {
             _ = AXUIElementPerformAction(button, kAXPressAction as CFString)
         }
         try await Task.sleep(nanoseconds: 300_000_000)
@@ -367,20 +366,28 @@ private enum WindowControl {
 
     static func focusedWindow(of app: NSRunningApplication) throws -> AXUIElement? {
         let axApp = AXUIElementCreateApplication(app.processIdentifier)
-        if let focused = attribute(axApp, kAXFocusedWindowAttribute as CFString) {
-            return (focused as! AXUIElement)
+        if let focused = element(axApp, kAXFocusedWindowAttribute as CFString) {
+            return focused
         }
-        if let main = attribute(axApp, kAXMainWindowAttribute as CFString) {
-            return (main as! AXUIElement)
+        if let main = element(axApp, kAXMainWindowAttribute as CFString) {
+            return main
         }
         return try windows(of: app).first
     }
 
+    static func element(_ parent: AXUIElement, _ name: CFString) -> AXUIElement? {
+        guard let value = attribute(parent, name),
+              CFGetTypeID(value) == AXUIElementGetTypeID() else { return nil }
+        return unsafeDowncast(value, to: AXUIElement.self)
+    }
+
     static func frame(of window: AXUIElement) -> CGRect? {
         guard let position = attribute(window, kAXPositionAttribute as CFString),
-              let size = attribute(window, kAXSizeAttribute as CFString) else { return nil }
-        let positionValue = position as! AXValue
-        let sizeValue = size as! AXValue
+              let size = attribute(window, kAXSizeAttribute as CFString),
+              CFGetTypeID(position) == AXValueGetTypeID(),
+              CFGetTypeID(size) == AXValueGetTypeID() else { return nil }
+        let positionValue = unsafeDowncast(position, to: AXValue.self)
+        let sizeValue = unsafeDowncast(size, to: AXValue.self)
         var point = CGPoint.zero
         var dimensions = CGSize.zero
         guard AXValueGetValue(positionValue, .cgPoint, &point),
