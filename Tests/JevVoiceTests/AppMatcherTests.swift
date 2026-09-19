@@ -50,6 +50,31 @@ final class AppMatcherTests: XCTestCase {
             aliases: AppMatcher.builtInAliases
         ))
     }
+
+    func testCandidatesUseAliasesAndFuzzySpelling() {
+        XCTAssertEqual(
+            AppMatcher.candidates(
+                for: "see max",
+                installedApps: ["cmux"],
+                aliases: AppMatcher.builtInAliases
+            ),
+            ["cmux"]
+        )
+        XCTAssertTrue(
+            AppMatcher.candidates(
+                for: "devon",
+                installedApps: ["Devin"],
+                aliases: AppMatcher.builtInAliases
+            ).contains("Devin")
+        )
+        XCTAssertTrue(
+            AppMatcher.candidates(
+                for: "zzzz gibberish",
+                installedApps: ["cmux", "Devin"],
+                aliases: AppMatcher.builtInAliases
+            ).isEmpty
+        )
+    }
 }
 
 final class VerbActionTests: XCTestCase {

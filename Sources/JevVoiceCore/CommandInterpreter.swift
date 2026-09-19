@@ -252,6 +252,7 @@ public final class CommandInterpreter {
             action: action,
             actionProbabilities: actionProbs,
             targetApp: targetApp,
+            spokenTarget: AppMatcher.spokenTarget(from: clause),
             targetAppProbabilities: targetProbs,
             systemAction: systemAction,
             url: url,

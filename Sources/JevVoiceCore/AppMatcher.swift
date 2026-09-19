@@ -114,6 +114,45 @@ public enum AppMatcher {
         return Match(app: best.app, confidence: best.full ? 0.95 : 0.8)
     }
 
+    public static func spokenTarget(from clause: String) -> String? {
+        let lowered = clause.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let match = verbs.lazy.compactMap({
+            lowered.range(of: $0.pattern, options: [.regularExpression, .caseInsensitive])
+        }).first else { return nil }
+        let target = lowered[match.upperBound...]
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: #"[.!?,;]+$"#, with: "", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return target.isEmpty ? nil : target
+    }
+
+    public static func candidates(
+        for spoken: String,
+        installedApps: [String],
+        aliases: [String: String] = [:],
+        limit: Int = 3
+    ) -> [String] {
+        let query = normalize(spoken)
+        guard !query.isEmpty else { return [] }
+        var scored: [(name: String, score: Double)] = []
+        for app in installedApps {
+            let direct = similarity(query, normalize(app))
+            var best = direct
+            for (alias, target) in aliases where target.caseInsensitiveCompare(app) == .orderedSame {
+                best = max(best, similarity(query, normalize(alias)))
+            }
+            if best >= 0.35 {
+                scored.append((app, best))
+            }
+        }
+        scored.sort {
+            $0.score != $1.score
+                ? $0.score > $1.score
+                : $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending
+        }
+        return Array(scored.prefix(limit).map(\.name))
+    }
+
     public static func refersToFrontmostLocally(clause: String) -> Bool {
         let lowered = clause.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
         guard let verb = verbs.first(where: {
@@ -139,5 +178,30 @@ public enum AppMatcher {
 
     private static func tokens(_ s: String) -> [String] {
         s.split(whereSeparator: { !$0.isLetter && !$0.isNumber }).map(String.init)
+    }
+
+    private static func normalize(_ value: String) -> String {
+        tokens(value.lowercased()).joined()
+    }
+
+    private static func similarity(_ lhs: String, _ rhs: String) -> Double {
+        guard !lhs.isEmpty, !rhs.isEmpty else { return 0 }
+        let lhsArray = Array(lhs)
+        let rhsArray = Array(rhs)
+        var previous = Array(0...rhsArray.count)
+        for (row, lhsCharacter) in lhsArray.enumerated() {
+            var current = [row + 1]
+            for (column, rhsCharacter) in rhsArray.enumerated() {
+                let cost = lhsCharacter == rhsCharacter ? 0 : 1
+                current.append(min(
+                    current[column] + 1,
+                    previous[column + 1] + 1,
+                    previous[column] + cost
+                ))
+            }
+            previous = current
+        }
+        let distance = previous[rhsArray.count]
+        return 1 - Double(distance) / Double(max(lhsArray.count, rhsArray.count))
     }
 }

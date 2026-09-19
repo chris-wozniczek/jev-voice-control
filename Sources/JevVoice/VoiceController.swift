@@ -20,6 +20,9 @@ final class VoiceController: ObservableObject {
     @Published var missingPermissions: [Permission] = Permission.missing
     @Published var hotKeyRegistered = true
     @Published var awaitingVoiceAnswer = false
+    @Published var speechStatusMessage: String?
+    @Published var suggestions: [String] = []
+    @Published var suggestionClause = ""
 
     var isListening: Bool { status == .listening }
 
@@ -84,6 +87,9 @@ final class VoiceController: ObservableObject {
             .filter { !$0.isEmpty }
             .sink { [weak self] in self?.transcript = $0 }
             .store(in: &cancellables)
+        recognizer.$statusMessage
+            .sink { [weak self] in self?.speechStatusMessage = $0 }
+            .store(in: &cancellables)
     }
 
     deinit {
@@ -114,6 +120,10 @@ final class VoiceController: ObservableObject {
         }
     }
 
+    func stopListening() {
+        recognizer.stop()
+    }
+
     func startListening() {
         speaker.stop()
         guard startTask == nil else { return }
@@ -130,6 +140,8 @@ final class VoiceController: ObservableObject {
             do {
                 decisions = []
                 transcript = ""
+                suggestions = []
+                suggestionClause = ""
                 recognizer.contextualStrings = AppRegistry.shared.spokenVariants
                 try recognizer.start()
                 status = .listening
@@ -164,6 +176,10 @@ final class VoiceController: ObservableObject {
             for i in result.indices { result[i].latencyMs = latencyMs }
             decisions = result
             history = (result + history).prefix(10).map { $0 }
+            if !decisions.contains(where: { $0.action != .none }),
+               await offerSuggestions(for: text, decisions: decisions) {
+                return
+            }
         } catch {
             status = .error(error.localizedDescription)
             speakError(error.localizedDescription)
@@ -177,10 +193,58 @@ final class VoiceController: ObservableObject {
         case .confirm(let reason):
             await requestVoiceConfirmation(reason: reason)
         case .reject(let reason):
+            if await offerSuggestions(for: text, decisions: decisions) {
+                return
+            }
             status = .error(reason)
             await speakIfEnabled(reason)
             onDone?()
         }
+    }
+
+    @MainActor
+    private func offerSuggestions(for text: String, decisions: [Decision]) async -> Bool {
+        let registry = AppRegistry.shared
+        let candidateDecision = decisions.first {
+            Action.appTargeted.contains($0.action) && $0.targetApp == nil
+        }
+        let clause = candidateDecision?.clause
+            ?? ClauseSplitter.split(text, boundaries: ClauseSplitter.candidateBoundaries(text))
+                .first(where: { AppMatcher.verbAction(clause: $0) != nil })
+            ?? text
+        let spoken = candidateDecision?.spokenTarget ?? AppMatcher.spokenTarget(from: clause)
+        guard let spoken, !spoken.isEmpty else { return false }
+        let candidates = AppMatcher.candidates(
+            for: spoken,
+            installedApps: registry.names,
+            aliases: registry.aliases
+        )
+        guard !candidates.isEmpty else { return false }
+        suggestions = candidates
+        suggestionClause = clause
+        status = .error("I didn't catch the app")
+        await speakIfEnabled("I didn't catch the app — did you mean \(candidates[0])?")
+        onDone?()
+        return true
+    }
+
+    func useSuggestion(_ app: String, teachAlias: Bool = false) {
+        let clause = suggestionClause
+        guard !clause.isEmpty else { return }
+        let phrase = AppMatcher.spokenTarget(from: clause) ?? ""
+        guard !phrase.isEmpty else { return }
+        if teachAlias {
+            config.appAliases[phrase.lowercased()] = app
+            AppRegistry.shared.refresh()
+        }
+        let replacement = clause.replacingOccurrences(
+            of: phrase,
+            with: app,
+            options: [.caseInsensitive]
+        )
+        suggestions = []
+        suggestionClause = ""
+        Task { await interpretAndExecute(replacement) }
     }
 
     private func requestVoiceConfirmation(reason: String) async {
@@ -243,6 +307,8 @@ final class VoiceController: ObservableObject {
         recognizer.stop()
         guard status == .awaitingConfirm || status == .listening else { return }
         decisions = []
+        suggestions = []
+        suggestionClause = ""
         status = .idle
     }
 
