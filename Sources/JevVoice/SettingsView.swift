@@ -5,6 +5,7 @@ import SwiftUI
 struct SettingsView: View {
     @EnvironmentObject var controller: VoiceController
     @ObservedObject private var config = Config.shared
+    @ObservedObject private var whisperStore = WhisperModelStore.shared
     @State private var aliasDrafts: [AliasDraft] = []
 
     private var voices: [AVSpeechSynthesisVoice] {
@@ -59,6 +60,8 @@ struct SettingsView: View {
                         .toggleStyle(.switch)
                         .controlSize(.small)
                     }
+
+                    hearingSection
 
                     section("Voice", systemImage: "speaker.wave.2") {
                 VStack(alignment: .leading, spacing: 8) {
@@ -117,8 +120,8 @@ struct SettingsView: View {
                             }
                             .buttonStyle(.borderless)
                         }
-                        .onChange(of: draft.alias) { _ in saveAliases() }
-                        .onChange(of: draft.target) { _ in saveAliases() }
+                        .onChange(of: draft.alias) { _, _ in saveAliases() }
+                        .onChange(of: draft.target) { _, _ in saveAliases() }
                     }
                     Button {
                         aliasDrafts.append(AliasDraft(alias: "", target: AppRegistry.shared.names.first ?? ""))
@@ -141,6 +144,67 @@ struct SettingsView: View {
             }
         }
         .onAppear { loadAliases() }
+    }
+
+    private var hearingSection: some View {
+        section("Hearing", systemImage: "waveform.and.mic") {
+            VStack(alignment: .leading, spacing: 10) {
+                Picker("Engine", selection: $config.speechEngine) {
+                    Text("Apple Speech").tag(SpeechEngineKind.apple)
+                    Text("Whisper on-device").tag(SpeechEngineKind.whisper)
+                }
+                Picker("Whisper model", selection: $config.whisperModel) {
+                    ForEach(WhisperModelStore.models) { model in
+                        Text(model.name).tag(model.id)
+                    }
+                }
+                .disabled(config.speechEngine != .whisper)
+                .onChange(of: config.whisperModel) { _, model in
+                    whisperStore.select(model)
+                }
+                HStack {
+                    switch whisperStore.state {
+                    case .notDownloaded:
+                        Text("Not downloaded")
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                        Button("Download") { whisperStore.downloadSelected() }
+                            .controlSize(.small)
+                    case .downloading(let progress):
+                        ProgressView(value: progress)
+                        Text("\(Int(progress * 100))%")
+                            .font(.caption.monospacedDigit())
+                            .foregroundStyle(.secondary)
+                    case .ready:
+                        Text(whisperStore.readySizeMB.map { "Ready · \($0) MB" } ?? "Ready")
+                            .foregroundStyle(.secondary)
+                    case .failed(let message):
+                        Text(message)
+                            .font(.caption2)
+                            .foregroundStyle(.red)
+                        Spacer()
+                        Button("Retry") { whisperStore.downloadSelected() }
+                            .controlSize(.small)
+                    }
+                }
+                Picker("Listening", selection: $config.listeningMode) {
+                    Text("Tap to talk").tag(ListeningMode.toggle)
+                    Text("Hold to talk").tag(ListeningMode.hold)
+                }
+                if config.listeningMode == .toggle {
+                    HStack {
+                        Text("Silence timeout")
+                        Slider(value: $config.silenceTimeout, in: 1...5, step: 0.5)
+                        Text("\(config.silenceTimeout, specifier: "%.1f") s")
+                            .font(.caption.monospacedDigit())
+                            .frame(width: 38, alignment: .trailing)
+                    }
+                }
+                Text("Whisper hears app names like cmux and Devin more reliably; runs fully offline.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+        }
     }
 
     private func section<Content: View>(

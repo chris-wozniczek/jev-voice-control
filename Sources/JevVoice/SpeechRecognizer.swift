@@ -1,25 +1,21 @@
 import AVFoundation
-import os
+import Combine
+import Foundation
+import JevVoiceCore
 import Speech
 
 @MainActor
 final class SpeechRecognizer: ObservableObject {
     @Published private(set) var transcript = ""
     @Published private(set) var isRunning = false
+    @Published private(set) var statusMessage: String?
 
     var onFinalTranscript: ((String) -> Void)?
     var contextualStrings: [String] = []
-    /// Called when recognition ends without a usable transcript, with the
-    /// underlying error if the system reported one.
     var onEndedWithoutSpeech: ((Error?) -> Void)?
-    private let log = Logger(subsystem: "com.chriswozniczek.jevvoice", category: "speech")
 
-    private var audioEngine = AVAudioEngine()
-    private var recognizer: SFSpeechRecognizer?
-    private var request: SFSpeechAudioBufferRecognitionRequest?
-    private var task: SFSpeechRecognitionTask?
+    private var engine: SpeechEngine?
     private var silenceTimer: Timer?
-    private var heardSpeech = false
 
     static func requestAuthorization() async -> Bool {
         let speechStatus = await withCheckedContinuation { continuation in
@@ -28,111 +24,109 @@ final class SpeechRecognizer: ObservableObject {
             }
         }
         guard speechStatus == .authorized else { return false }
-        if #available(macOS 14, *) {
-            return await AVAudioApplication.requestRecordPermission()
-        }
-        return await withCheckedContinuation { continuation in
-            AVCaptureDevice.requestAccess(for: .audio) { granted in
-                continuation.resume(returning: granted)
-            }
-        }
+        return await AVAudioApplication.requestRecordPermission()
     }
 
     func start() throws {
-        stop(fireCallback: false)
+        cancel()
         transcript = ""
-        heardSpeech = false
-
-        let recognizer = SFSpeechRecognizer(locale: Locale.current)
-        guard let recognizer, recognizer.isAvailable else {
-            throw NSError(
-                domain: "JevVoice.Speech", code: 1,
-                userInfo: [NSLocalizedDescriptionKey: "Speech recognizer unavailable"]
-            )
+        let engine: SpeechEngine = Config.shared.speechEngine == .whisper
+            ? WhisperSpeechEngine()
+            : AppleSpeechEngine()
+        engine.vocabulary = contextualStrings
+        engine.onPartial = { [weak self] text in
+            self?.receivePartial(text)
         }
-        self.recognizer = recognizer
-
-        let request = SFSpeechAudioBufferRecognitionRequest()
-        request.shouldReportPartialResults = true
-        request.contextualStrings = contextualStrings
-        self.request = request
-
-        // A fresh engine picks up the current default input device and the
-        // microphone permission granted since the last attempt.
-        audioEngine = AVAudioEngine()
-        let inputNode = audioEngine.inputNode
-        let format = inputNode.inputFormat(forBus: 0)
-        guard format.sampleRate > 0, format.channelCount > 0 else {
-            self.request = nil
-            throw NSError(
-                domain: "JevVoice.Speech", code: 2,
-                userInfo: [NSLocalizedDescriptionKey: "No microphone input available"]
-            )
+        engine.onFinal = { [weak self] text in
+            self?.receiveFinal(text)
         }
-        inputNode.installTap(onBus: 0, bufferSize: 1024, format: format) { [weak self] buffer, _ in
-            self?.request?.append(buffer)
+        engine.onError = { [weak self] error in
+            self?.receiveError(error)
         }
-
-        audioEngine.prepare()
-        do {
-            try audioEngine.start()
-        } catch {
-            inputNode.removeTap(onBus: 0)
-            self.request = nil
-            throw error
+        engine.onStatus = { [weak self] message in
+            self?.statusMessage = message
         }
+        try engine.start()
+        self.engine = engine
         isRunning = true
-        log.info("listening: \(format.sampleRate, privacy: .public) Hz, \(format.channelCount, privacy: .public) ch, onDevice=\(recognizer.supportsOnDeviceRecognition, privacy: .public)")
+    }
 
-        task = recognizer.recognitionTask(with: request) { [weak self] result, error in
-            guard let self else { return }
-            Task { @MainActor in
-                if let result {
-                    let text = result.bestTranscription.formattedString
-                    self.log.debug("partial: \(text.count, privacy: .public) chars")
-                    self.transcript = text
-                    if !text.isEmpty {
-                        self.heardSpeech = true
-                        self.scheduleSilenceFinalize()
-                    }
-                    if result.isFinal { self.stop(fireCallback: true) }
-                }
-                if let error {
-                    self.log.error("recognition error: \(error.localizedDescription, privacy: .public)")
-                    self.stop(fireCallback: true, error: error)
-                }
+    func stop() {
+        guard isRunning else { return }
+        silenceTimer?.invalidate()
+        silenceTimer = nil
+        engine?.finish()
+    }
+
+    func cancel() {
+        silenceTimer?.invalidate()
+        silenceTimer = nil
+        engine?.cancel()
+        engine = nil
+        statusMessage = nil
+        isRunning = false
+    }
+
+    private func receivePartial(_ text: String) {
+        guard isRunning else { return }
+        transcript = text
+        if !text.isEmpty {
+            if Config.shared.listeningMode == .toggle {
+                scheduleSilenceFinalize()
+            }
+            if hasEndWord(text) {
+                stop()
             }
         }
     }
 
-    func stop() {
-        stop(fireCallback: true)
-    }
-
-    private func stop(fireCallback: Bool, error: Error? = nil) {
+    private func receiveFinal(_ text: String) {
+        isRunning = false
         silenceTimer?.invalidate()
         silenceTimer = nil
-        guard isRunning || task != nil else { return }
-        isRunning = false
-        audioEngine.stop()
-        audioEngine.inputNode.removeTap(onBus: 0)
-        request?.endAudio()
-        task?.cancel()
-        request = nil
-        task = nil
-        guard fireCallback else { return }
-        if heardSpeech, !transcript.isEmpty {
-            onFinalTranscript?(transcript)
+        statusMessage = nil
+        let cleaned = stripEndWord(text)
+        transcript = cleaned
+        engine = nil
+        if cleaned.isEmpty {
+            onEndedWithoutSpeech?(nil)
         } else {
+            onFinalTranscript?(cleaned)
+        }
+    }
+
+    private func receiveError(_ error: Error) {
+        let wasRunning = isRunning
+        isRunning = false
+        silenceTimer?.invalidate()
+        silenceTimer = nil
+        statusMessage = nil
+        engine = nil
+        if wasRunning {
             onEndedWithoutSpeech?(error)
         }
     }
 
     private func scheduleSilenceFinalize() {
         silenceTimer?.invalidate()
-        silenceTimer = Timer.scheduledTimer(withTimeInterval: 1.2, repeats: false) { [weak self] _ in
-            guard let self else { return }
-            Task { @MainActor in self.stop(fireCallback: true) }
+        silenceTimer = Timer.scheduledTimer(
+            withTimeInterval: Config.shared.silenceTimeout,
+            repeats: false
+        ) { [weak self] _ in
+            Task { @MainActor in
+                self?.stop()
+            }
         }
+    }
+
+    private func hasEndWord(_ text: String) -> Bool {
+        text.range(
+            of: #"\b(go|do it|execute|send it|over)[.!?,;]*$"#,
+            options: [.regularExpression, .caseInsensitive]
+        ) != nil
+    }
+
+    private func stripEndWord(_ text: String) -> String {
+        ClauseSplitter.stripTrailingEndWord(text)
     }
 }
