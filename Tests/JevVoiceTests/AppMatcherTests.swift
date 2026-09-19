@@ -31,6 +31,25 @@ final class AppMatcherTests: XCTestCase {
                                      installedApps: ["Google Chrome", "Chrome Remote Desktop"])
         XCTAssertEqual(match?.confidence, 0.5)
     }
+
+    func testBuiltInAlias() {
+        XCTAssertEqual(
+            AppMatcher.match(
+                clause: "open see mux",
+                installedApps: ["cmux"],
+                aliases: AppMatcher.builtInAliases
+            ),
+            .init(app: "cmux", confidence: 0.95)
+        )
+    }
+
+    func testAliasWhoseTargetIsNotInstalledDoesNotMatch() {
+        XCTAssertNil(AppMatcher.match(
+            clause: "open chrome",
+            installedApps: ["Safari"],
+            aliases: AppMatcher.builtInAliases
+        ))
+    }
 }
 
 final class VerbActionTests: XCTestCase {

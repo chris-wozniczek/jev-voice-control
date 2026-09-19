@@ -2,29 +2,31 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-	<key>CFBundleIdentifier</key>
-	<string>com.chriswozniczek.jevvoice</string>
-	<key>CFBundleName</key>
-	<string>Jev Voice</string>
 	<key>CFBundleDisplayName</key>
 	<string>Jev Voice</string>
 	<key>CFBundleExecutable</key>
 	<string>JevVoice</string>
+	<key>CFBundleIconFile</key>
+	<string>AppIcon</string>
+	<key>CFBundleIdentifier</key>
+	<string>com.chriswozniczek.jevvoice</string>
+	<key>CFBundleName</key>
+	<string>Jev Voice</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
-	<string>0.1.6</string>
+	<string>0.2.0</string>
 	<key>CFBundleVersion</key>
-	<string>7</string>
-	<key>LSUIElement</key>
-	<true/>
+	<string>8</string>
 	<key>LSMinimumSystemVersion</key>
 	<string>13.0</string>
+	<key>LSUIElement</key>
+	<true/>
+	<key>NSAppleEventsUsageDescription</key>
+	<string>Jev Voice uses automation to control volume and system features.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Jev Voice needs microphone access to hear your voice commands.</string>
 	<key>NSSpeechRecognitionUsageDescription</key>
 	<string>Jev Voice transcribes your commands on-device using Speech Recognition.</string>
-	<key>NSAppleEventsUsageDescription</key>
-	<string>Jev Voice uses automation to control volume and system features.</string>
 </dict>
 </plist>

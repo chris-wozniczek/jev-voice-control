@@ -12,6 +12,14 @@ Press **⌥Space**, say something, and Jev decides what to do:
 - "type hello world"
 - "set volume to 30"
 - "search for swift concurrency"
+- "maximize chrome"
+- "full screen safari"
+- "restore chrome"
+
+App names support common aliases such as “chrome”, “code”, “cmux”, and
+“settings”. The app can speak short execution replies using the selected macOS
+voice, and Settings can enable **Ask before running commands** for a
+voice-confirmation step.
 
 Speech is transcribed **on-device** (SFSpeechRecognizer). Only the transcript is
 sent to the Jev API.
@@ -22,7 +30,7 @@ sent to the Jev API.
 microphone ──> SFSpeechRecognizer (on-device) ──> transcript
                                                       │
                                           ClauseSplitter (multi-verb clauses)
-                                                      │
+                                          │
                               POST /v1/systemone  ──> Jev (typed answers)
                                 per clause: action?   target_app?
                                             system_action? mentions_url?
@@ -49,8 +57,9 @@ Arguments (URLs, queries, dictation text, percentages) can't come from Jev —
 it's decision-only — so they're extracted deterministically by `SlotExtractor`
 heuristics.
 
-Low-confidence decisions (< threshold, default 70%) require clicking **Run** in
-the popover before anything executes.
+Most commands execute locally without a network call. Commands Jev handles
+remain typed decisions; low-confidence or ambiguous commands ask for
+confirmation before anything executes.
 
 ## Install with Homebrew
 
@@ -98,8 +107,8 @@ defaults write com.chriswozniczek.jevvoice typesafeAPIKey <key>
   from heuristics over the transcript, not from the model.
 - System actions are AppleScript/`pmset` based; brightness key codes may vary
   on some hardware.
-- App launching scans `/Applications`, `/System/Applications`, Utilities, and
-  `~/Applications`.
+- App launching scans standard macOS application directories and running
+  regular applications, with aliases and user-defined aliases from Settings.
 
 ## Privacy
 

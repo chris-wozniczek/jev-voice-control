@@ -3,15 +3,21 @@ import Foundation
 public final class CommandInterpreter {
     private let client: JevClient
     private let installedApps: [String]
+    private let aliases: [String: String]
 
     private static let browserNames: Set<String> = [
         "safari", "google chrome", "chrome", "firefox", "arc", "brave browser",
         "microsoft edge", "opera", "vivaldi", "orion", "duckduckgo",
     ]
 
-    public init(client: JevClient, installedApps: [String]) {
+    public init(
+        client: JevClient,
+        installedApps: [String],
+        aliases: [String: String] = [:]
+    ) {
         self.client = client
         self.installedApps = installedApps
+        self.aliases = aliases
     }
 
     struct State: Encodable {
@@ -19,12 +25,14 @@ public final class CommandInterpreter {
         let fullTranscript: String
         let frontmostApp: String?
         let installedApps: [String]
+        let aliases: [String: String]
 
         enum CodingKeys: String, CodingKey {
             case clause
             case fullTranscript = "full_transcript"
             case frontmostApp = "frontmost_app"
             case installedApps = "installed_apps"
+            case aliases
         }
     }
 
@@ -95,6 +103,14 @@ public final class CommandInterpreter {
         return try await withThrowingTaskGroup(of: (Int, Decision).self) { group in
             for (index, clause) in clauses.enumerated() {
                 group.addTask {
+                    if let local = LocalCommandParser.parse(
+                        clause: clause,
+                        installedApps: self.installedApps,
+                        aliases: self.aliases,
+                        frontmostApp: frontmostApp
+                    ) {
+                        return (index, local)
+                    }
                     let decision = try await self.interpretClause(
                         clause, transcript: transcript, frontmostApp: frontmostApp
                     )
@@ -144,7 +160,8 @@ public final class CommandInterpreter {
             clause: clause,
             fullTranscript: transcript,
             frontmostApp: frontmostApp,
-            installedApps: installedApps
+            installedApps: installedApps,
+            aliases: aliases
         )
         let (response, latencyMs) = try await client.systemOne(state: state, questions: questions)
 
@@ -189,7 +206,9 @@ public final class CommandInterpreter {
             query = q
         }
         let localMatch = refersToFrontmost
-            ? nil : AppMatcher.match(clause: clause, installedApps: installedApps)
+            ? nil : AppMatcher.match(
+                clause: clause, installedApps: installedApps, aliases: aliases
+            )
         if url == nil, query == nil, action != .openURL, action != .webSearch,
            let verbAction = AppMatcher.verbAction(clause: clause), let local = localMatch {
             action = verbAction

@@ -32,6 +32,15 @@ enum Executor {
         case .minimizeApp:
             guard let name = decision.targetApp else { throw ExecutorError.missingSlot("target app") }
             return try minimizeApp(named: name)
+        case .maximizeApp:
+            guard let name = decision.targetApp else { throw ExecutorError.missingSlot("target app") }
+            return try await maximizeApp(named: name)
+        case .fullscreenApp:
+            guard let name = decision.targetApp else { throw ExecutorError.missingSlot("target app") }
+            return try await fullscreenApp(named: name)
+        case .restoreApp:
+            guard let name = decision.targetApp else { throw ExecutorError.missingSlot("target app") }
+            return try restoreApp(named: name)
         case .hideApp:
             guard let name = decision.targetApp else { throw ExecutorError.missingSlot("target app") }
             return try hideApp(named: name)
@@ -113,24 +122,106 @@ enum Executor {
 
     private static func minimizeApp(named name: String) throws -> String {
         guard let app = runningApp(named: name) else { return "\(name) is not running" }
-        let axApp = AXUIElementCreateApplication(app.processIdentifier)
-        var windowsValue: CFTypeRef?
-        let status = AXUIElementCopyAttributeValue(axApp, kAXWindowsAttribute as CFString, &windowsValue)
-        guard status == .success, let windows = windowsValue as? [AXUIElement] else {
-            throw NSError(
-                domain: "JevVoice.Executor", code: Int(status.rawValue),
-                userInfo: [NSLocalizedDescriptionKey: "Cannot access windows of \(app.localizedName ?? name) (Accessibility permission?)"]
-            )
+        let windows = try WindowControl.windows(of: app)
+        var minimized = 0
+        for window in windows {
+            guard AXUIElementSetAttributeValue(
+                window, kAXMinimizedAttribute as CFString, kCFBooleanTrue
+            ) == .success else { continue }
+            if WindowControl.isMinimized(window) == true { minimized += 1 }
         }
-        let failed = windows.filter {
-            AXUIElementSetAttributeValue($0, kAXMinimizedAttribute as CFString, kCFBooleanTrue) != .success
-        }
-        guard failed.isEmpty else {
-            throw ExecutorError.controlFailed(
-                "Could not minimize \(failed.count) of \(windows.count) \(app.localizedName ?? name) windows"
-            )
+        guard minimized > 0 else {
+            throw ExecutorError.controlFailed("Could not minimize \(app.localizedName ?? name)")
         }
         return "Minimized \(app.localizedName ?? name)"
+    }
+
+    @MainActor
+    private static func maximizeApp(named name: String) async throws -> String {
+        guard let app = runningApp(named: name) else { return "\(name) is not running" }
+        try WindowControl.requireAccessibility()
+        app.unhide()
+        for window in try WindowControl.windows(of: app) {
+            _ = AXUIElementSetAttributeValue(window, kAXMinimizedAttribute as CFString, kCFBooleanFalse)
+        }
+        guard app.activate(options: [.activateAllWindows]) else {
+            throw ExecutorError.controlFailed("Could not activate \(name)")
+        }
+        if let url = app.bundleURL {
+            try await waitForApplication(url: url, timeout: 1.0, requireFrontmost: true)
+        }
+        guard let window = try WindowControl.focusedWindow(of: app),
+              let currentFrame = WindowControl.frame(of: window) else {
+            throw ExecutorError.controlFailed("Could not find a window for \(name)")
+        }
+        let primaryHeight = NSScreen.screens.first?.frame.height ?? currentFrame.height
+        let currentCocoaFrame = CGRect(
+            x: currentFrame.minX,
+            y: primaryHeight - currentFrame.maxY,
+            width: currentFrame.width,
+            height: currentFrame.height
+        )
+        let screen = NSScreen.screens.first {
+            $0.visibleFrame.intersects(currentCocoaFrame)
+        } ?? NSScreen.main ?? NSScreen.screens[0]
+        let visible = screen.visibleFrame
+        let target = CGRect(
+            x: visible.minX,
+            y: primaryHeight - visible.maxY,
+            width: visible.width,
+            height: visible.height
+        )
+        WindowControl.set(frame: target, of: window)
+        if let frame = WindowControl.frame(of: window), WindowControl.isNear(frame, target) {
+            return "Maximized \(name)"
+        }
+        if let button = WindowControl.element(window, kAXZoomButtonAttribute as CFString) {
+            _ = AXUIElementPerformAction(button, kAXPressAction as CFString)
+        }
+        try await Task.sleep(nanoseconds: 300_000_000)
+        if let frame = WindowControl.frame(of: window), WindowControl.isNear(frame, target) {
+            return "Maximized \(name)"
+        }
+        throw ExecutorError.controlFailed("Could not maximize \(name)")
+    }
+
+    @MainActor
+    private static func fullscreenApp(named name: String) async throws -> String {
+        guard let app = runningApp(named: name) else { return "\(name) is not running" }
+        try WindowControl.requireAccessibility()
+        guard let window = try WindowControl.focusedWindow(of: app) else {
+            throw ExecutorError.controlFailed("Could not find a window for \(name)")
+        }
+        if WindowControl.booleanAttribute(window, "AXFullScreen") == true {
+            return "\(name) is already full screen"
+        }
+        guard AXUIElementSetAttributeValue(
+            window, "AXFullScreen" as CFString, kCFBooleanTrue
+        ) == .success else {
+            throw ExecutorError.controlFailed("Could not enter full screen for \(name)")
+        }
+        for _ in 0..<15 {
+            try await Task.sleep(nanoseconds: 100_000_000)
+            if WindowControl.booleanAttribute(window, "AXFullScreen") == true {
+                return "Full screen \(name)"
+            }
+        }
+        throw ExecutorError.controlFailed("Could not enter full screen for \(name)")
+    }
+
+    private static func restoreApp(named name: String) throws -> String {
+        guard let app = runningApp(named: name) else { return "\(name) is not running" }
+        try WindowControl.requireAccessibility()
+        app.unhide()
+        let windows = try WindowControl.windows(of: app)
+        for window in windows {
+            _ = AXUIElementSetAttributeValue(window, kAXMinimizedAttribute as CFString, kCFBooleanFalse)
+        }
+        _ = app.activate(options: [.activateAllWindows])
+        guard windows.contains(where: { WindowControl.isMinimized($0) == false }) else {
+            throw ExecutorError.controlFailed("Could not restore \(name)")
+        }
+        return "Restored \(name)"
     }
 
     private static func hideApp(named name: String) throws -> String {
@@ -249,5 +340,94 @@ enum Executor {
             )
         }
         return output
+    }
+}
+
+private enum WindowControl {
+    static func requireAccessibility() throws {
+        guard AXIsProcessTrusted() else {
+            throw ExecutorError.controlFailed(
+                "Accessibility permission is required to control windows"
+            )
+        }
+    }
+
+    static func windows(of app: NSRunningApplication) throws -> [AXUIElement] {
+        try requireAccessibility()
+        let axApp = AXUIElementCreateApplication(app.processIdentifier)
+        guard let value = attribute(axApp, kAXWindowsAttribute as CFString),
+              let windows = value as? [AXUIElement] else {
+            throw ExecutorError.controlFailed(
+                "Could not access windows of \(app.localizedName ?? "application")"
+            )
+        }
+        return windows
+    }
+
+    static func focusedWindow(of app: NSRunningApplication) throws -> AXUIElement? {
+        let axApp = AXUIElementCreateApplication(app.processIdentifier)
+        if let focused = element(axApp, kAXFocusedWindowAttribute as CFString) {
+            return focused
+        }
+        if let main = element(axApp, kAXMainWindowAttribute as CFString) {
+            return main
+        }
+        return try windows(of: app).first
+    }
+
+    static func element(_ parent: AXUIElement, _ name: CFString) -> AXUIElement? {
+        guard let value = attribute(parent, name),
+              CFGetTypeID(value) == AXUIElementGetTypeID() else { return nil }
+        return unsafeDowncast(value, to: AXUIElement.self)
+    }
+
+    static func frame(of window: AXUIElement) -> CGRect? {
+        guard let position = attribute(window, kAXPositionAttribute as CFString),
+              let size = attribute(window, kAXSizeAttribute as CFString),
+              CFGetTypeID(position) == AXValueGetTypeID(),
+              CFGetTypeID(size) == AXValueGetTypeID() else { return nil }
+        let positionValue = unsafeDowncast(position, to: AXValue.self)
+        let sizeValue = unsafeDowncast(size, to: AXValue.self)
+        var point = CGPoint.zero
+        var dimensions = CGSize.zero
+        guard AXValueGetValue(positionValue, .cgPoint, &point),
+              AXValueGetValue(sizeValue, .cgSize, &dimensions) else { return nil }
+        return CGRect(origin: point, size: dimensions)
+    }
+
+    static func set(frame: CGRect, of window: AXUIElement) {
+        var point = frame.origin
+        var dimensions = frame.size
+        if let position = AXValueCreate(.cgPoint, &point),
+           let size = AXValueCreate(.cgSize, &dimensions) {
+            _ = AXUIElementSetAttributeValue(
+                window, kAXPositionAttribute as CFString, position
+            )
+            _ = AXUIElementSetAttributeValue(window, kAXSizeAttribute as CFString, size)
+            _ = AXUIElementSetAttributeValue(
+                window, kAXPositionAttribute as CFString, position
+            )
+        }
+    }
+
+    static func isNear(_ lhs: CGRect, _ rhs: CGRect) -> Bool {
+        abs(lhs.width - rhs.width) <= rhs.width * 0.03
+            && abs(lhs.height - rhs.height) <= rhs.height * 0.03
+    }
+
+    static func isMinimized(_ window: AXUIElement) -> Bool? {
+        booleanAttribute(window, kAXMinimizedAttribute as String)
+    }
+
+    static func booleanAttribute(_ element: AXUIElement, _ name: String) -> Bool? {
+        attribute(element, name as CFString) as? Bool
+    }
+
+    static func attribute(_ element: AXUIElement, _ name: CFString) -> CFTypeRef? {
+        var value: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(element, name, &value) == .success else {
+            return nil
+        }
+        return value
     }
 }
