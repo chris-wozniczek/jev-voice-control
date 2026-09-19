@@ -91,20 +91,40 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func registerHotKey() {
-        var eventSpec = EventTypeSpec(
-            eventClass: OSType(kEventClassKeyboard),
-            eventKind: UInt32(kEventHotKeyPressed)
-        )
-        let handler: EventHandlerUPP = { _, _, userData in
+        var eventSpecs = [
+            EventTypeSpec(
+                eventClass: OSType(kEventClassKeyboard),
+                eventKind: UInt32(kEventHotKeyPressed)
+            ),
+            EventTypeSpec(
+                eventClass: OSType(kEventClassKeyboard),
+                eventKind: UInt32(kEventHotKeyReleased)
+            ),
+        ]
+        let handler: EventHandlerUPP = { _, event, userData in
             guard let userData else { return noErr }
             let delegate = Unmanaged<AppDelegate>.fromOpaque(userData).takeUnretainedValue()
-            Task { @MainActor in delegate.controller.toggle() }
+            guard let event else { return noErr }
+            let kind = GetEventKind(event)
+            Task { @MainActor in
+                if kind == UInt32(kEventHotKeyPressed) {
+                    if delegate.controller.config.listeningMode == .hold {
+                        delegate.controller.startListening()
+                    } else {
+                        delegate.controller.toggle()
+                    }
+                } else if delegate.controller.config.listeningMode == .hold {
+                    delegate.controller.stopListening()
+                }
+            }
             return noErr
         }
-        InstallEventHandler(
-            GetApplicationEventTarget(), handler, 1, &eventSpec,
-            Unmanaged.passUnretained(self).toOpaque(), nil
-        )
+        _ = eventSpecs.withUnsafeMutableBufferPointer { buffer in
+            InstallEventHandler(
+                GetApplicationEventTarget(), handler, 2, buffer.baseAddress,
+                Unmanaged.passUnretained(self).toOpaque(), nil
+            )
+        }
         let hotKeyID = EventHotKeyID(signature: OSType(0x4A56_5631), id: 1) // "JVV1"
         let status = RegisterEventHotKey(
             UInt32(kVK_Space), UInt32(optionKey), hotKeyID,

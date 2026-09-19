@@ -1,6 +1,15 @@
 import Foundation
 import Combine
 import AVFoundation
+import JevVoiceCore
+
+enum ListeningMode: String, CaseIterable {
+    case toggle, hold
+}
+
+enum SpeechEngineKind: String, CaseIterable {
+    case apple, whisper
+}
 
 final class Config: ObservableObject {
     static let shared = Config()
@@ -43,6 +52,29 @@ final class Config: ObservableObject {
 		didSet { UserDefaults.standard.set(computerUseEnabled, forKey: "computerUseEnabled") }
 	}
 
+    @Published var listeningMode: ListeningMode {
+        didSet { UserDefaults.standard.set(listeningMode.rawValue, forKey: "listeningMode") }
+    }
+
+    @Published var silenceTimeout: Double {
+        didSet {
+            let constrained = HearingSettings.constrainedSilenceTimeout(silenceTimeout)
+            if constrained != silenceTimeout {
+                silenceTimeout = constrained
+            } else {
+                UserDefaults.standard.set(silenceTimeout, forKey: "silenceTimeout")
+            }
+        }
+    }
+
+    @Published var speechEngine: SpeechEngineKind {
+        didSet { UserDefaults.standard.set(speechEngine.rawValue, forKey: "speechEngine") }
+    }
+
+    @Published var whisperModel: String {
+        didSet { UserDefaults.standard.set(whisperModel, forKey: "whisperModel") }
+    }
+
     private init() {
         let defaults = UserDefaults.standard
         self.apiKey = defaults.string(forKey: "typesafeAPIKey")
@@ -58,10 +90,20 @@ final class Config: ObservableObject {
         } else {
             self.alwaysConfirm = (defaults.object(forKey: "autoExecute") as? Bool) == false
         }
-		self.appAliases = defaults.dictionary(forKey: "appAliases") as? [String: String] ?? [:]
-		self.deepSeekAPIKey = defaults.string(forKey: "deepSeekAPIKey")
-			?? ProcessInfo.processInfo.environment["DEEPSEEK_API_KEY"]
-			?? ""
-		self.computerUseEnabled = defaults.object(forKey: "computerUseEnabled") as? Bool ?? true
-	}
+        self.appAliases = defaults.dictionary(forKey: "appAliases") as? [String: String] ?? [:]
+        self.deepSeekAPIKey = defaults.string(forKey: "deepSeekAPIKey")
+            ?? ProcessInfo.processInfo.environment["DEEPSEEK_API_KEY"]
+            ?? ""
+        self.computerUseEnabled = defaults.object(forKey: "computerUseEnabled") as? Bool ?? true
+        self.listeningMode = ListeningMode(
+            rawValue: defaults.string(forKey: "listeningMode") ?? ""
+        ) ?? .toggle
+        let timeout = defaults.object(forKey: "silenceTimeout") as? Double
+            ?? HearingSettings.defaultSilenceTimeout
+        self.silenceTimeout = HearingSettings.constrainedSilenceTimeout(timeout)
+        self.speechEngine = SpeechEngineKind(
+            rawValue: defaults.string(forKey: "speechEngine") ?? ""
+        ) ?? .apple
+        self.whisperModel = defaults.string(forKey: "whisperModel") ?? "openai_whisper-small"
+    }
 }

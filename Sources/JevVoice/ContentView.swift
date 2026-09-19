@@ -21,6 +21,9 @@ struct ContentView: View {
                             permissionsBanner
                         }
                         transcriptCard
+                        if !controller.suggestions.isEmpty {
+                            suggestionSection
+                        }
                         if agentRunner.isRunning || !agentRunner.steps.isEmpty {
                             agentStepsSection
                         } else if !controller.decisions.isEmpty {
@@ -125,7 +128,38 @@ struct ContentView: View {
 
     private var transcriptText: String {
         if !controller.transcript.isEmpty { return controller.transcript }
+        if let status = controller.speechStatusMessage, controller.isListening {
+            return status
+        }
         return controller.isListening ? "Listening…" : "Press Talk or ⌥Space and say what you need."
+    }
+
+    private var suggestionSection: some View {
+        Card(tint: .orange) {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Did you mean:")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                HStack(spacing: 6) {
+                    ForEach(controller.suggestions, id: \.self) { app in
+                        HStack(spacing: 2) {
+                            Button(app) {
+                                controller.useSuggestion(app)
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .controlSize(.small)
+                            Button {
+                                controller.useSuggestion(app, teachAlias: true)
+                            } label: {
+                                Image(systemName: "graduationcap")
+                            }
+                            .buttonStyle(.borderless)
+                            .help("Teach this phrase as an alias for \(app)")
+                        }
+                    }
+                }
+            }
+        }
     }
 
     private var stepsSection: some View {
@@ -245,15 +279,32 @@ struct ContentView: View {
 
     private var footer: some View {
         HStack(spacing: 12) {
-            Button {
-                controller.toggle()
-            } label: {
-                Label(controller.isListening ? "Stop" : "Talk",
-                      systemImage: controller.isListening ? "stop.fill" : "mic.fill")
-                    .font(.body.weight(.semibold))
-                    .frame(minWidth: 72)
+            Group {
+                if controller.config.listeningMode == .hold {
+                    Button {} label: {
+                        Label("Hold to talk", systemImage: "mic.fill")
+                            .font(.body.weight(.semibold))
+                            .frame(minWidth: 98)
+                    }
+                    .simultaneousGesture(
+                        DragGesture(minimumDistance: 0)
+                            .onChanged { _ in
+                                if !controller.isListening { controller.startListening() }
+                            }
+                            .onEnded { _ in controller.stopListening() }
+                    )
+                } else {
+                    Button {
+                        controller.toggle()
+                    } label: {
+                        Label(controller.isListening ? "Stop" : "Talk",
+                              systemImage: controller.isListening ? "stop.fill" : "mic.fill")
+                            .font(.body.weight(.semibold))
+                            .frame(minWidth: 72)
+                    }
+                    .buttonStyle(.borderedProminent)
+                }
             }
-            .buttonStyle(.borderedProminent)
             .controlSize(.large)
             .tint(controller.isListening ? .red : .accentColor)
             .disabled(controller.missingPermissions.contains { $0 != .accessibility })
@@ -261,7 +312,12 @@ struct ContentView: View {
                 Text(controller.hotKeyRegistered ? "⌥ Space" : "⌥Space is taken")
                     .font(.caption.weight(.medium).monospaced())
                     .foregroundStyle(controller.hotKeyRegistered ? Color.secondary : Color.orange)
-                Text(controller.hotKeyRegistered ? "from any app" : "by another app")
+                Text(controller.config.listeningMode == .hold
+                     ? "release to run"
+                     : "say “go” or pause to run")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                Text(controller.config.listeningMode == .hold ? "hold to talk" : "tap to talk")
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
             }

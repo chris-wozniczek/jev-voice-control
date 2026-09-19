@@ -60,6 +60,7 @@ public enum LocalCommandParser {
         if let localMatch {
             return Decision(
                 clause: trimmed, action: verb, targetApp: localMatch.app,
+                spokenTarget: AppMatcher.spokenTarget(from: trimmed),
                 confidence: max(0.8, localMatch.confidence), model: "local"
             )
         }
@@ -68,6 +69,7 @@ public enum LocalCommandParser {
            let frontmostApp {
             return Decision(
                 clause: trimmed, action: verb, targetApp: frontmostApp,
+                spokenTarget: AppMatcher.spokenTarget(from: trimmed),
                 confidence: 0.9, model: "local"
             )
         }
