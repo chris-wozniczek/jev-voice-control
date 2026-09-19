@@ -326,19 +326,22 @@ final class WhisperSpeechEngine: SpeechEngine {
         }
         self.converter = converter
         inputNode.installTap(onBus: 0, bufferSize: 1024, format: inputFormat) { [weak self] buffer, _ in
-            self?.append(buffer, outputFormat: outputFormat)
+            let floats = Self.convert(buffer, with: converter, to: outputFormat)
+            guard !floats.isEmpty else { return }
+            Task { @MainActor in self?.append(floats) }
         }
         audioEngine.prepare()
         try audioEngine.start()
     }
 
-    private func append(_ buffer: AVAudioPCMBuffer, outputFormat: AVAudioFormat) {
-        guard let converter else { return }
+    private nonisolated static func convert(
+        _ buffer: AVAudioPCMBuffer, with converter: AVAudioConverter, to outputFormat: AVAudioFormat
+    ) -> [Float] {
         let capacity = AVAudioFrameCount(
             max(1, ceil(Double(buffer.frameLength) * outputFormat.sampleRate / buffer.format.sampleRate))
         )
         guard let converted = AVAudioPCMBuffer(pcmFormat: outputFormat, frameCapacity: capacity) else {
-            return
+            return []
         }
         var consumed = false
         var conversionError: NSError?
@@ -351,9 +354,12 @@ final class WhisperSpeechEngine: SpeechEngine {
             status.pointee = .haveData
             return buffer
         }
-        guard conversionError == nil, let data = converted.floatChannelData?[0] else { return }
-        let count = Int(converted.frameLength)
-        samples.append(contentsOf: UnsafeBufferPointer(start: data, count: count))
+        guard conversionError == nil, let data = converted.floatChannelData?[0] else { return [] }
+        return Array(UnsafeBufferPointer(start: data, count: Int(converted.frameLength)))
+    }
+
+    private func append(_ floats: [Float]) {
+        samples.append(contentsOf: floats)
         let maxSamples = 30 * 16_000
         if samples.count > maxSamples {
             samples.removeFirst(samples.count - maxSamples)
