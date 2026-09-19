@@ -252,7 +252,13 @@ final class AgentRunner: ObservableObject {
             return $0.name.localizedCaseInsensitiveContains(requested)
         }
         guard let app else {
-            return ToolOutput(text: "No running applications were reported.", content: "No running applications were reported.", image: nil)
+            let target = requested.flatMap { $0.isEmpty ? nil : $0 }
+                ?? frontmost
+                ?? "the frontmost app"
+            let reportedApps = apps.map(\.name).joined(separator: ", ")
+            let list = reportedApps.isEmpty ? "none" : reportedApps
+            let message = "Could not match \(target) among running apps: \(list)"
+            return ToolOutput(text: message, content: message, image: nil)
         }
         let windows = try await CuaDriver.shared.windows(pid: app.pid)
         guard let window = windows.first else {

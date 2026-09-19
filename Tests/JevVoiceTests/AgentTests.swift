@@ -88,6 +88,23 @@ final class AgentTests: XCTestCase {
     }
 
     @MainActor
+    func testRoutingRequiresKeyRegardlessOfTranscript() {
+        for transcript in [
+            "please open chrome now",
+            "please inspect this window",
+            "open chrome, search for cats",
+        ] {
+            XCTAssertFalse(VoiceController.shouldRoute(
+                transcript: transcript,
+                decisions: [],
+                verdict: .run,
+                hasKey: false,
+                enabled: true
+            ))
+        }
+    }
+
+    @MainActor
     func testBudgetExhaustion() async {
         let planner = NeverDonePlanner()
         let outcome = await AgentRunner.shared.run(

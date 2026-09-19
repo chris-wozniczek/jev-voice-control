@@ -187,9 +187,15 @@ final class VoiceController: ObservableObject {
         }
 
         let verdict = ExecutionPolicy.verdict(for: decisions, alwaysConfirm: config.alwaysConfirm)
+        let verdictIsReject: Bool
+        if case .reject = verdict {
+            verdictIsReject = true
+        } else {
+            verdictIsReject = false
+        }
         if config.computerUseEnabled,
            config.deepSeekAPIKey.isEmpty,
-           interpretationError != nil || decisions.isEmpty || Self.looksOpenEnded(text) {
+           interpretationError != nil || decisions.isEmpty || verdictIsReject {
             let message = "Add a DeepSeek API key in Settings to let Jev do open-ended tasks"
             status = .error(message)
             await speakIfEnabled(message)

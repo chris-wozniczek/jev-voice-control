@@ -34,11 +34,6 @@ extension VoiceController {
         return dictateOnly && words >= 4 && !startsWithLocalVerb
     }
 
-    static func looksOpenEnded(_ transcript: String) -> Bool {
-        transcript.split(whereSeparator: { $0.isWhitespace }).count >= 4
-            && !startsWithLocalCommand(transcript)
-    }
-
     private static func startsWithLocalCommand(_ transcript: String) -> Bool {
         if AppMatcher.verbAction(clause: transcript) != nil { return true }
         guard let first = transcript.split(whereSeparator: { $0.isWhitespace }).first?
