@@ -388,7 +388,7 @@ struct JevLogo: View {
                     )
                     .shadow(color: .black.opacity(0.25), radius: s * 0.04, y: s * 0.02)
                 HStack(spacing: s * 0.045) {
-                    ForEach([0.18, 0.30, 0.44, 0.30, 0.18], id: \.self) { h in
+                    ForEach(Array([0.18, 0.30, 0.44, 0.30, 0.18].enumerated()), id: \.offset) { _, h in
                         Capsule().fill(.white).frame(width: s * 0.085, height: s * h)
                     }
                 }
