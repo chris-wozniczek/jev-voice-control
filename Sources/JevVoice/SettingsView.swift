@@ -5,8 +5,10 @@ import SwiftUI
 struct SettingsView: View {
     @EnvironmentObject var controller: VoiceController
     @ObservedObject private var config = Config.shared
+    @ObservedObject private var driver = CuaDriver.shared
     @ObservedObject private var whisperStore = WhisperModelStore.shared
     @State private var aliasDrafts: [AliasDraft] = []
+    @State private var driverTestStatus = ""
 
     private var voices: [AVSpeechSynthesisVoice] {
         let preferredPrefixes = Locale.preferredLanguages.map {
@@ -61,8 +63,56 @@ struct SettingsView: View {
                         .controlSize(.small)
                     }
 
-                    hearingSection
+                    section("Computer use", systemImage: "macwindow") {
+                        VStack(alignment: .leading, spacing: 8) {
+                            SecureField("DeepSeek API key", text: $config.deepSeekAPIKey)
+                                .textFieldStyle(.roundedBorder)
+                            Toggle("Let Jev operate apps (DeepSeek Flash + Cua)", isOn: $config.computerUseEnabled)
+                                .toggleStyle(.switch)
+                                .controlSize(.small)
+                            HStack {
+                                Text(driverStatus)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                Spacer()
+                                Button("Test driver") {
+                                    Task {
+                                        do {
+                                            let apps = try await driver.apps()
+                                            driverTestStatus = "\(apps.count) apps found"
+                                        } catch {
+                                            driverTestStatus = error.localizedDescription
+                                        }
+                                    }
+                                }
+                                .controlSize(.small)
+                            }
+                            if !driverTestStatus.isEmpty {
+                                Text(driverTestStatus)
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                            }
+                            HStack {
+                                VStack(alignment: .leading, spacing: 1) {
+                                    Text("Screen Recording")
+                                        .font(.callout)
+                                    Text("Optional for screenshots when an app has no accessibility tree")
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                }
+                                Spacer()
+                                Text(Permission.screenRecording.isGranted ? "Allowed" : "Not allowed")
+                                    .font(.caption)
+                                    .foregroundStyle(Permission.screenRecording.isGranted ? .green : .orange)
+                                Button(Permission.screenRecording.isGranted ? "Open" : "Allow") {
+                                    Permission.screenRecording.openSystemSettings()
+                                }
+                                .controlSize(.small)
+                            }
+                        }
+                    }
 
+                    hearingSection
                     section("Voice", systemImage: "speaker.wave.2") {
                 VStack(alignment: .leading, spacing: 8) {
                     Picker("Voice", selection: $config.voiceIdentifier) {
@@ -228,6 +278,15 @@ struct SettingsView: View {
         default: quality = "Default"
         }
         return "\(voice.name) (\(voice.language), \(quality))"
+    }
+
+    private var driverStatus: String {
+        switch driver.state {
+        case .stopped: return "Driver: Not started"
+        case .starting: return "Driver: Starting…"
+        case .ready: return "Driver: Ready"
+        case .failed(let message): return "Driver: Failed — \(message)"
+        }
     }
 
     private func loadAliases() {

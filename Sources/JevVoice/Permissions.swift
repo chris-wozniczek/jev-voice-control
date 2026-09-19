@@ -7,6 +7,7 @@ enum Permission: String, CaseIterable, Identifiable {
     case microphone = "Microphone"
     case speechRecognition = "Speech Recognition"
     case accessibility = "Accessibility"
+    case screenRecording = "Screen Recording"
 
     var id: String { rawValue }
 
@@ -15,6 +16,7 @@ enum Permission: String, CaseIterable, Identifiable {
         case .microphone: return "hear your commands"
         case .speechRecognition: return "transcribe them"
         case .accessibility: return "type dictated text"
+        case .screenRecording: return "capture screenshots for computer use"
         }
     }
 
@@ -23,6 +25,7 @@ enum Permission: String, CaseIterable, Identifiable {
         case .microphone: return "Privacy_Microphone"
         case .speechRecognition: return "Privacy_SpeechRecognition"
         case .accessibility: return "Privacy_Accessibility"
+        case .screenRecording: return "Privacy_ScreenCapture"
         }
     }
 
@@ -37,6 +40,8 @@ enum Permission: String, CaseIterable, Identifiable {
             return SFSpeechRecognizer.authorizationStatus() == .authorized
         case .accessibility:
             return AXIsProcessTrusted()
+        case .screenRecording:
+            return CGPreflightScreenCaptureAccess()
         }
     }
 
@@ -52,10 +57,14 @@ enum Permission: String, CaseIterable, Identifiable {
             return SFSpeechRecognizer.authorizationStatus() == .notDetermined
         case .accessibility:
             return true
+        case .screenRecording:
+            return false
         }
     }
 
-    static var missing: [Permission] { allCases.filter { !$0.isGranted } }
+    static var missing: [Permission] {
+        allCases.filter { $0 != .screenRecording && !$0.isGranted }
+    }
 
     /// Triggers the system prompt where one is still available, otherwise opens System Settings.
     @MainActor
@@ -79,6 +88,8 @@ enum Permission: String, CaseIterable, Identifiable {
         case .accessibility:
             let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
             _ = AXIsProcessTrustedWithOptions(options)
+        case .screenRecording:
+            _ = CGRequestScreenCaptureAccess()
         }
     }
 

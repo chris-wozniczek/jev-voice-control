@@ -22,7 +22,7 @@ let package = Package(
         ),
         .testTarget(
             name: "JevVoiceTests",
-            dependencies: ["JevVoiceCore"],
+            dependencies: ["JevVoiceCore", "JevVoice"],
             path: "Tests/JevVoiceTests"
         ),
     ]
