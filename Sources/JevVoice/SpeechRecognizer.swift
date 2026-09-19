@@ -8,6 +8,7 @@ final class SpeechRecognizer: ObservableObject {
     @Published private(set) var isRunning = false
 
     var onFinalTranscript: ((String) -> Void)?
+    var contextualStrings: [String] = []
     /// Called when recognition ends without a usable transcript, with the
     /// underlying error if the system reported one.
     var onEndedWithoutSpeech: ((Error?) -> Void)?
@@ -53,6 +54,7 @@ final class SpeechRecognizer: ObservableObject {
 
         let request = SFSpeechAudioBufferRecognitionRequest()
         request.shouldReportPartialResults = true
+        request.contextualStrings = contextualStrings
         self.request = request
 
         // A fresh engine picks up the current default input device and the
