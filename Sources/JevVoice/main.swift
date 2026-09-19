@@ -43,9 +43,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    func applicationWillTerminate(_ notification: Notification) {
-        if let hotKeyRef { UnregisterEventHotKey(hotKeyRef) }
-    }
+	func applicationWillTerminate(_ notification: Notification) {
+		if let hotKeyRef { UnregisterEventHotKey(hotKeyRef) }
+		CuaDriver.shared.shutdown()
+	}
 
     @objc private func statusItemClicked() {
         togglePopover()

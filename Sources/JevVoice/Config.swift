@@ -31,9 +31,17 @@ final class Config: ObservableObject {
         didSet { UserDefaults.standard.set(alwaysConfirm, forKey: "alwaysConfirm") }
     }
 
-    @Published var appAliases: [String: String] {
-        didSet { UserDefaults.standard.set(appAliases, forKey: "appAliases") }
-    }
+	@Published var appAliases: [String: String] {
+		didSet { UserDefaults.standard.set(appAliases, forKey: "appAliases") }
+	}
+
+	@Published var deepSeekAPIKey: String {
+		didSet { UserDefaults.standard.set(deepSeekAPIKey, forKey: "deepSeekAPIKey") }
+	}
+
+	@Published var computerUseEnabled: Bool {
+		didSet { UserDefaults.standard.set(computerUseEnabled, forKey: "computerUseEnabled") }
+	}
 
     private init() {
         let defaults = UserDefaults.standard
@@ -50,6 +58,10 @@ final class Config: ObservableObject {
         } else {
             self.alwaysConfirm = (defaults.object(forKey: "autoExecute") as? Bool) == false
         }
-        self.appAliases = defaults.dictionary(forKey: "appAliases") as? [String: String] ?? [:]
-    }
+		self.appAliases = defaults.dictionary(forKey: "appAliases") as? [String: String] ?? [:]
+		self.deepSeekAPIKey = defaults.string(forKey: "deepSeekAPIKey")
+			?? ProcessInfo.processInfo.environment["DEEPSEEK_API_KEY"]
+			?? ""
+		self.computerUseEnabled = defaults.object(forKey: "computerUseEnabled") as? Bool ?? true
+	}
 }

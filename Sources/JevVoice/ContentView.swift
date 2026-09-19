@@ -3,6 +3,7 @@ import SwiftUI
 
 struct ContentView: View {
     @EnvironmentObject var controller: VoiceController
+    @ObservedObject private var agentRunner = AgentRunner.shared
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -20,7 +21,9 @@ struct ContentView: View {
                             permissionsBanner
                         }
                         transcriptCard
-                        if !controller.decisions.isEmpty {
+                        if agentRunner.isRunning || !agentRunner.steps.isEmpty {
+                            agentStepsSection
+                        } else if !controller.decisions.isEmpty {
                             stepsSection
                         } else if controller.transcript.isEmpty {
                             hints
@@ -146,6 +149,52 @@ struct ContentView: View {
             if controller.status == .awaitingConfirm {
                 confirmBar
             }
+        }
+    }
+
+    private var agentStepsSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text("Computer use")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                Spacer()
+                if agentRunner.isRunning {
+                    Button("Stop") { agentRunner.cancel() }
+                        .buttonStyle(.borderedProminent)
+                        .tint(.red)
+                        .controlSize(.small)
+                }
+            }
+            ForEach(Array(agentRunner.steps.suffix(8))) { step in
+                Card {
+                    HStack(spacing: 8) {
+                        stepIcon(step.result)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("\(step.index). \(step.tool)")
+                                .font(.callout.weight(.medium))
+                            if !step.argsSummary.isEmpty {
+                                Text(step.argsSummary)
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(1)
+                            }
+                        }
+                        Spacer()
+                        Text(String(format: "%.1fs", step.elapsed))
+                            .font(.caption2.monospacedDigit())
+                            .foregroundStyle(.tertiary)
+                    }
+                }
+            }
+        }
+    }
+
+    private func stepIcon(_ result: AgentStepResult) -> some View {
+        switch result {
+        case .ok: return Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
+        case .failed: return Image(systemName: "xmark.circle.fill").foregroundStyle(.red)
+        case .pendingConfirm: return Image(systemName: "hourglass").foregroundStyle(.orange)
         }
     }
 

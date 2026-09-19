@@ -59,7 +59,13 @@ final class VoiceController: ObservableObject {
         recognizer.onFinalTranscript = { [weak self] text in
             Task { @MainActor in
                 guard let self else { return }
-                if self.awaitingVoiceAnswer {
+                if AgentRunner.shared.isRunning,
+                   ["stop", "cancel", "never mind", "nevermind"].contains(text.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)) {
+                    AgentRunner.shared.cancel()
+                    self.status = .idle
+                } else if AgentRunner.shared.resolveConfirmation(text) {
+                    self.awaitingVoiceAnswer = false
+                } else if self.awaitingVoiceAnswer {
                     await self.handleConfirmAnswer(text)
                 } else {
                     await self.interpretAndExecute(text)
@@ -84,6 +90,13 @@ final class VoiceController: ObservableObject {
             .filter { !$0.isEmpty }
             .sink { [weak self] in self?.transcript = $0 }
             .store(in: &cancellables)
+        AgentRunner.shared.confirmationHandler = { [weak self] reason in
+            guard let self else { return }
+            self.status = .awaitingConfirm
+            self.awaitingVoiceAnswer = true
+            await self.speakIfEnabled("\(reason). Yes or no?")
+            self.startListening()
+        }
     }
 
     deinit {
@@ -107,6 +120,10 @@ final class VoiceController: ObservableObject {
         switch status {
         case .listening:
             recognizer.stop()
+        case .executing:
+            AgentRunner.shared.cancel()
+            status = .idle
+            onDone?()
         case .idle, .done, .error:
             startListening()
         default:
@@ -155,6 +172,7 @@ final class VoiceController: ObservableObject {
             aliases: registry.aliases
         )
 
+        var interpretationError: Error?
         do {
             var result = try await interpreter.interpret(
                 transcript: text, frontmostApp: lastExternalFrontmostApp
@@ -165,13 +183,33 @@ final class VoiceController: ObservableObject {
             decisions = result
             history = (result + history).prefix(10).map { $0 }
         } catch {
-            status = .error(error.localizedDescription)
-            speakError(error.localizedDescription)
+            interpretationError = error
+        }
+
+        let verdict = ExecutionPolicy.verdict(for: decisions, alwaysConfirm: config.alwaysConfirm)
+        if config.computerUseEnabled,
+           config.deepSeekAPIKey.isEmpty,
+           interpretationError != nil || decisions.isEmpty || Self.looksOpenEnded(text) {
+            let message = "Add a DeepSeek API key in Settings to let Jev do open-ended tasks"
+            status = .error(message)
+            await speakIfEnabled(message)
+            onDone?()
+            return
+        }
+        if shouldUseComputerAgent(
+            transcript: text, decisions: decisions, verdict: verdict, error: interpretationError
+        ) {
+            await agentFallback(transcript: text)
+            return
+        }
+        if let interpretationError {
+            status = .error(interpretationError.localizedDescription)
+            speakError(interpretationError.localizedDescription)
             onDone?()
             return
         }
 
-        switch ExecutionPolicy.verdict(for: decisions, alwaysConfirm: config.alwaysConfirm) {
+        switch verdict {
         case .run:
             await executeAll()
         case .confirm(let reason):
@@ -287,7 +325,7 @@ final class VoiceController: ObservableObject {
         }
     }
 
-    private func speakIfEnabled(_ text: String) async {
+    func speakIfEnabled(_ text: String) async {
         guard config.speakReplies else { return }
         await speaker.say(text)
     }
