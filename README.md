@@ -42,6 +42,9 @@ and products; the same words are supplied to Apple Speech and Whisper.
 Jev first interprets deterministic local commands, then picks the next action
 from the live accessibility elements on screen. DeepSeek Flash is an optional
 fallback for open-ended tasks or screens without accessible controls.
+Goal words rank matching controls ahead of unrelated settings, while a newly
+opened Settings, Preferences, or About surface is detected and closed so the
+request can continue on the original window.
 
 Computer use settings let you choose the Jev step planner or DeepSeek Flash,
 and control DeepSeek thinking (off, low, or high). In Jev mode, the DeepSeek

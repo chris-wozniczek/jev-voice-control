@@ -30,9 +30,11 @@ struct PlannerContext {
     var goal: String = ""
     var targetApp: String? = nil
     var windowTitle: String? = nil
+    var previousWindowTitle: String? = nil
     var generatedText: String? = nil
     var snapshot: CuaSnapshot? = nil
     var typedTextVisible: Bool? = nil
+    var excludedLabels: Set<String> = []
     var history: [PlannerStepRecord] = []
     var stepIndex: Int = 0
 
@@ -41,9 +43,11 @@ struct PlannerContext {
         goal: String = "",
         targetApp: String? = nil,
         windowTitle: String? = nil,
+        previousWindowTitle: String? = nil,
         generatedText: String? = nil,
         snapshot: CuaSnapshot? = nil,
         typedTextVisible: Bool? = nil,
+        excludedLabels: Set<String> = [],
         history: [PlannerStepRecord] = [],
         stepIndex: Int = 0
     ) {
@@ -51,9 +55,11 @@ struct PlannerContext {
         self.goal = goal
         self.targetApp = targetApp
         self.windowTitle = windowTitle
+        self.previousWindowTitle = previousWindowTitle
         self.generatedText = generatedText
         self.snapshot = snapshot
         self.typedTextVisible = typedTextVisible
+        self.excludedLabels = excludedLabels
         self.history = history
         self.stepIndex = stepIndex
     }
