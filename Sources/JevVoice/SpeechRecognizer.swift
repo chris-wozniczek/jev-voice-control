@@ -46,7 +46,15 @@ final class SpeechRecognizer: ObservableObject {
         engine.onStatus = { [weak self] message in
             self?.statusMessage = message
         }
-        try engine.start()
+        Log.speech.info(
+            "engine start name=\(String(describing: type(of: engine)), privacy: .public) mode=\(Config.shared.listeningMode.rawValue, privacy: .public)"
+        )
+        do {
+            try engine.start()
+        } catch {
+            Log.speech.info("engine start error=\(error.localizedDescription, privacy: .public)")
+            throw error
+        }
         self.engine = engine
         isRunning = true
     }
@@ -86,6 +94,7 @@ final class SpeechRecognizer: ObservableObject {
         silenceTimer = nil
         statusMessage = nil
         let cleaned = stripEndWord(text)
+        Log.speech.info("final transcript=\(cleaned, privacy: .public)")
         transcript = cleaned
         engine = nil
         if cleaned.isEmpty {
@@ -96,6 +105,7 @@ final class SpeechRecognizer: ObservableObject {
     }
 
     private func receiveError(_ error: Error) {
+        Log.speech.info("recognition error=\(error.localizedDescription, privacy: .public)")
         let wasRunning = isRunning
         isRunning = false
         silenceTimer?.invalidate()

@@ -79,6 +79,10 @@ final class DeepSeekPlanner: ActionPlanner {
         let (data, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
             let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+            let body = String(decoding: data.prefix(300), as: UTF8.self)
+            Log.agent.info(
+                "DeepSeek HTTP status=\(status) errorBody=\(body, privacy: .public)"
+            )
             throw AgentError.api("DeepSeek returned HTTP \(status)")
         }
         return try Self.decodeTurn(data: data)

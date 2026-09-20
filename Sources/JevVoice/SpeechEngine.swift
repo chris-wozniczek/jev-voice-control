@@ -104,6 +104,7 @@ final class WhisperModelStore: ObservableObject {
         }
         state = .downloading(progress: 0)
         let model = selected
+        Log.speech.info("Whisper model loading name=\(model.id, privacy: .public)")
         let modelStore = self
         let storeReference = WhisperStoreReference(self)
         downloadTask = Task { [weak modelStore] in
@@ -123,9 +124,13 @@ final class WhisperModelStore: ObservableObject {
                 UserDefaults.standard.set(modelStore.modelPaths, forKey: "whisperModelPaths")
                 modelStore.downloadTask = nil
                 modelStore.state = .ready
+                Log.speech.info("Whisper model ready name=\(model.id, privacy: .public)")
             } catch {
                 modelStore?.downloadTask = nil
                 modelStore?.state = .failed(error.localizedDescription)
+                Log.speech.info(
+                    "Whisper model failure name=\(model.id, privacy: .public) error=\(error.localizedDescription, privacy: .public)"
+                )
             }
         }
     }
@@ -264,12 +269,14 @@ final class WhisperSpeechEngine: SpeechEngine {
         }
         finishing = false
         samples = []
+        Log.speech.info("Whisper model loading name=\(self.store.selected.id, privacy: .public)")
         onStatus?("Loading model…")
         loadTask = Task { [weak self] in
             do {
                 guard let self else { return }
                 let kit = try await self.store.loadKit(at: modelPath)
                 self.whisperKit = kit
+                Log.speech.info("Whisper model ready name=\(self.store.selected.id, privacy: .public)")
                 self.onStatus?(nil)
                 try self.startAudio()
                 self.partialTask = Task { [weak self] in
@@ -281,6 +288,9 @@ final class WhisperSpeechEngine: SpeechEngine {
                 }
             } catch {
                 self?.onStatus?(nil)
+                Log.speech.info(
+                    "Whisper model failure error=\(error.localizedDescription, privacy: .public)"
+                )
                 self?.onError?(error)
             }
         }
