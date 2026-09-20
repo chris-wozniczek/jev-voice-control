@@ -68,6 +68,10 @@ final class Config: ObservableObject {
         didSet { UserDefaults.standard.set(appActionsEnabled, forKey: "appActionsEnabled") }
     }
 
+    @Published var nativeAXEnabled: Bool {
+        didSet { UserDefaults.standard.set(nativeAXEnabled, forKey: "nativeAXEnabled") }
+    }
+
     @Published var cdpEnabled: Bool {
         didSet { UserDefaults.standard.set(cdpEnabled, forKey: "cdpEnabled") }
     }
@@ -144,6 +148,7 @@ final class Config: ObservableObject {
             ?? ""
         self.computerUseEnabled = defaults.object(forKey: "computerUseEnabled") as? Bool ?? true
         self.appActionsEnabled = defaults.object(forKey: "appActionsEnabled") as? Bool ?? true
+        self.nativeAXEnabled = defaults.object(forKey: "nativeAXEnabled") as? Bool ?? true
         self.cdpEnabled = defaults.object(forKey: "cdpEnabled") as? Bool ?? true
         self.cdpPort = defaults.object(forKey: "cdpPort") as? Int ?? 9222
         self.generatorSource = GeneratorSource(
