@@ -33,7 +33,9 @@ Typing activates the target app before every keystroke path and reads the
 focused field back after typing. If the field does not show the text, Jev uses
 an in-process Unicode keyboard fallback and keeps the task open for
 verification. Settings › Hearing includes extra vocabulary for sites, models,
-and products; the same words are supplied to Apple Speech and Whisper.
+and products; the same words are supplied to Apple Speech and Whisper. Whisper's
+language code is configurable in Settings › Hearing; leave it blank for
+automatic language detection.
 
 ## How it works
 

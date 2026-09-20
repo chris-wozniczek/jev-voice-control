@@ -9,6 +9,7 @@ protocol SpeechEngine: AnyObject {
     var onPartial: ((String) -> Void)? { get set }
     var onFinal: ((String) -> Void)? { get set }
     var onError: ((Error) -> Void)? { get set }
+    var onListening: (() -> Void)? { get set }
     var onStatus: ((String?) -> Void)? { get set }
     var vocabulary: [String] { get set }
     func start() throws
@@ -155,6 +156,7 @@ final class AppleSpeechEngine: NSObject, SpeechEngine {
     var onPartial: ((String) -> Void)?
     var onFinal: ((String) -> Void)?
     var onError: ((Error) -> Void)?
+    var onListening: (() -> Void)?
     var onStatus: ((String?) -> Void)?
     var vocabulary: [String] = []
 
@@ -213,6 +215,7 @@ final class AppleSpeechEngine: NSObject, SpeechEngine {
                 }
             }
         }
+        onListening?()
     }
 
     func finish() {
@@ -242,6 +245,7 @@ final class WhisperSpeechEngine: SpeechEngine {
     var onPartial: ((String) -> Void)?
     var onFinal: ((String) -> Void)?
     var onError: ((Error) -> Void)?
+    var onListening: (() -> Void)?
     var onStatus: ((String?) -> Void)?
     var vocabulary: [String] = []
 
@@ -255,6 +259,8 @@ final class WhisperSpeechEngine: SpeechEngine {
     private var transcriptionInFlight = false
     private var transcriptionDirty = false
     private var finishing = false
+    private var generation = 0
+    private var finishTask: Task<Void, Never>?
 
     init(store: WhisperModelStore? = nil) {
         self.store = store ?? .shared
@@ -269,29 +275,42 @@ final class WhisperSpeechEngine: SpeechEngine {
         }
         finishing = false
         samples = []
+        generation += 1
+        let currentGeneration = generation
         Log.speech.info("Whisper model loading name=\(self.store.selected.id, privacy: .public)")
         onStatus?("Loading model…")
+        try startAudio()
+        onListening?()
         loadTask = Task { [weak self] in
             do {
                 guard let self else { return }
                 let kit = try await self.store.loadKit(at: modelPath)
+                guard !Task.isCancelled, self.generation == currentGeneration else { return }
                 self.whisperKit = kit
                 Log.speech.info("Whisper model ready name=\(self.store.selected.id, privacy: .public)")
                 self.onStatus?(nil)
-                try self.startAudio()
-                self.partialTask = Task { [weak self] in
-                    while !Task.isCancelled {
-                        try? await Task.sleep(nanoseconds: 800_000_000)
-                        guard !Task.isCancelled else { return }
-                        await self?.transcribeLatest(isFinal: false)
+                self.loadTask = nil
+                if self.finishing {
+                    self.finishTask?.cancel()
+                    self.finishTask = nil
+                    await self.transcribeLatest(isFinal: true)
+                } else {
+                    self.partialTask = Task { [weak self] in
+                        while !Task.isCancelled {
+                            try? await Task.sleep(nanoseconds: 800_000_000)
+                            guard !Task.isCancelled else { return }
+                            await self?.transcribeLatest(isFinal: false)
+                        }
                     }
                 }
             } catch {
-                self?.onStatus?(nil)
+                guard let self, self.generation == currentGeneration else { return }
+                self.loadTask = nil
+                self.onStatus?(nil)
                 Log.speech.info(
                     "Whisper model failure error=\(error.localizedDescription, privacy: .public)"
                 )
-                self?.onError?(error)
+                self.onError?(error)
             }
         }
     }
@@ -302,6 +321,25 @@ final class WhisperSpeechEngine: SpeechEngine {
         partialTask = nil
         audioEngine.stop()
         audioEngine.inputNode.removeTap(onBus: 0)
+        guard whisperKit != nil else {
+            let currentGeneration = generation
+            finishTask?.cancel()
+            finishTask = Task { [weak self] in
+                let deadline = Date().addingTimeInterval(30)
+                while Date() < deadline {
+                    try? await Task.sleep(nanoseconds: 200_000_000)
+                    guard !Task.isCancelled, let self,
+                          self.generation == currentGeneration else { return }
+                    if self.whisperKit != nil || self.loadTask == nil { return }
+                }
+                guard let self, self.generation == currentGeneration else { return }
+                self.loadTask?.cancel()
+                self.loadTask = nil
+                self.generation += 1
+                self.onError?(SpeechEngineError.message("Whisper model loading timed out"))
+            }
+            return
+        }
         Task { [weak self] in
             await self?.transcribeLatest(isFinal: true)
         }
@@ -312,6 +350,10 @@ final class WhisperSpeechEngine: SpeechEngine {
         partialTask = nil
         loadTask?.cancel()
         loadTask = nil
+        finishTask?.cancel()
+        finishTask = nil
+        generation += 1
+        whisperKit = nil
         audioEngine.stop()
         audioEngine.inputNode.removeTap(onBus: 0)
         converter = nil
@@ -323,6 +365,9 @@ final class WhisperSpeechEngine: SpeechEngine {
         audioEngine = AVAudioEngine()
         let inputNode = audioEngine.inputNode
         let inputFormat = inputNode.inputFormat(forBus: 0)
+        Log.speech.info(
+            "whisper audio input sampleRate=\(inputFormat.sampleRate, privacy: .public) channels=\(inputFormat.channelCount, privacy: .public)"
+        )
         guard inputFormat.sampleRate > 0, inputFormat.channelCount > 0 else {
             throw SpeechEngineError.message("No microphone input available")
         }
@@ -364,7 +409,13 @@ final class WhisperSpeechEngine: SpeechEngine {
             status.pointee = .haveData
             return buffer
         }
-        guard conversionError == nil, let data = converted.floatChannelData?[0] else { return [] }
+        if let conversionError {
+            Log.speech.info(
+                "whisper convert error=\(conversionError.localizedDescription, privacy: .public)"
+            )
+            return []
+        }
+        guard let data = converted.floatChannelData?[0] else { return [] }
         return Array(UnsafeBufferPointer(start: data, count: Int(converted.frameLength)))
     }
 
@@ -381,6 +432,7 @@ final class WhisperSpeechEngine: SpeechEngine {
             if isFinal { onFinal?("") }
             return
         }
+        guard isFinal || samples.count >= 8_000 else { return }
         if transcriptionInFlight {
             transcriptionDirty = true
             return
@@ -392,7 +444,9 @@ final class WhisperSpeechEngine: SpeechEngine {
         let tokens = whisperKit.tokenizer.map {
             Array($0.encode(text: prompt).prefix(200))
         }
-        let languageCode = Locale.current.language.languageCode?.identifier
+        let languageCode = Config.shared.speechLanguage?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
         let language = languageCode.flatMap {
             Constants.languageCodes.contains($0) ? $0 : nil
         }
@@ -402,12 +456,38 @@ final class WhisperSpeechEngine: SpeechEngine {
             withoutTimestamps: true,
             promptTokens: tokens
         )
-        let result = await whisperKit.transcribe(audioArrays: [audio], decodeOptions: options)
-        let text = (result.first ?? nil)?
-            .map { $0.text }
-            .joined(separator: " ")
-            .trimmingCharacters(in: CharacterSet.whitespacesAndNewlines) ?? ""
-        if isFinal {
+        let results = await whisperKit.transcribeWithResults(
+            audioArrays: [audio],
+            decodeOptions: options
+        )
+        var text = ""
+        var failure: Error?
+        if let result = results.first {
+            switch result {
+            case .success(let segments):
+                text = segments.map(\.text).joined(separator: " ")
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+            case .failure(let error):
+                failure = error
+                Log.speech.info(
+                    "whisper transcribe error=\(error.localizedDescription, privacy: .public)"
+                )
+            }
+        } else {
+            failure = SpeechEngineError.message("Whisper returned no transcription result")
+            Log.speech.info(
+                "whisper transcribe error=\(failure!.localizedDescription, privacy: .public)"
+            )
+        }
+        Log.speech.info(
+            "whisper pass final=\(isFinal) samples=\(audio.count) text=\(text, privacy: .public)"
+        )
+        if failure == nil, text.isEmpty {
+            Log.speech.info("whisper transcribe empty samples=\(audio.count)")
+        }
+        if let failure, isFinal {
+            onError?(failure)
+        } else if isFinal {
             onFinal?(text)
         } else if !text.isEmpty {
             onPartial?(text)

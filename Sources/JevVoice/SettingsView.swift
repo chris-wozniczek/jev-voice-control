@@ -312,6 +312,15 @@ struct SettingsView: View {
                 .onChange(of: config.whisperModel) { _, model in
                     whisperStore.select(model)
                 }
+                TextField(
+                    "Language code (blank = auto)",
+                    text: Binding(
+                        get: { config.speechLanguage ?? "" },
+                        set: { config.speechLanguage = $0.isEmpty ? nil : $0 }
+                    )
+                )
+                .textFieldStyle(.roundedBorder)
+                .disabled(config.speechEngine != .whisper)
                 HStack {
                     switch whisperStore.state {
                     case .notDownloaded:
