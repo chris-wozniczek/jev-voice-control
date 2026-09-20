@@ -66,6 +66,21 @@ public enum SlotExtractor {
         return text.isEmpty ? nil : text
     }
 
+    public static func typedText(from clause: String) -> String? {
+        if let match = clause.range(of: #""([^"]+)"|'([^']+)'"#, options: .regularExpression) {
+            let quoted = String(clause[match])
+            return String(quoted.dropFirst().dropLast())
+        }
+        let pattern = #"\b(saying|that says|asking|ask it to|with the text|enter)\b"#
+        if let range = clause.range(of: pattern, options: [.regularExpression, .caseInsensitive]) {
+            let text = clause[range.upperBound...].trimmingCharacters(in: .whitespacesAndNewlines)
+            if !text.isEmpty {
+                return text
+            }
+        }
+        return dictationText(from: clause)
+    }
+
     public static func numberPercent(from clause: String) -> Int? {
         let lowered = clause.lowercased()
         if let regex = try? NSRegularExpression(pattern: #"\b(\d{1,3})\b"#),

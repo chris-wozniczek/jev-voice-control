@@ -26,6 +26,16 @@ sent to the Jev API.
 
 ## How it works
 
+### How it decides
+
+Jev first interprets deterministic local commands, then picks the next action
+from the live accessibility elements on screen. DeepSeek Flash is an optional
+fallback for open-ended tasks or screens without accessible controls.
+
+Computer use settings let you choose the Jev step planner or DeepSeek Flash,
+and control DeepSeek thinking (off, low, or high). In Jev mode, the DeepSeek
+key is optional and is only used for fallback.
+
 ```
 microphone ──> SFSpeechRecognizer (on-device) ──> transcript
                                                       │

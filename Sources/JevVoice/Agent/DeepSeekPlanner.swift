@@ -1,12 +1,49 @@
 import Foundation
 
+struct PlannerStepRecord: Equatable {
+    let tool: String
+    let argsSummary: String
+    let resultText: String
+    let succeeded: Bool
+}
+
 struct PlannerContext {
     var messages: [DeepSeekMessage]
+    var goal: String = ""
+    var targetApp: String? = nil
+    var windowTitle: String? = nil
+    var snapshot: CuaSnapshot? = nil
+    var history: [PlannerStepRecord] = []
+    var stepIndex: Int = 0
+
+    init(
+        messages: [DeepSeekMessage] = [],
+        goal: String = "",
+        targetApp: String? = nil,
+        windowTitle: String? = nil,
+        snapshot: CuaSnapshot? = nil,
+        history: [PlannerStepRecord] = [],
+        stepIndex: Int = 0
+    ) {
+        self.messages = messages
+        self.goal = goal
+        self.targetApp = targetApp
+        self.windowTitle = windowTitle
+        self.snapshot = snapshot
+        self.history = history
+        self.stepIndex = stepIndex
+    }
+}
+
+enum PlannerEscalation: Equatable {
+    case none
+    case toDeepSeek(reason: String)
 }
 
 struct PlannerTurn {
     let assistant: DeepSeekMessage
     let toolCalls: [DeepSeekToolCall]
+    var escalation: PlannerEscalation = .none
 }
 
 struct DeepSeekToolCall {
@@ -21,10 +58,30 @@ struct DeepSeekMessage {
     let name: String?
     let toolCallID: String?
     let toolCalls: [DeepSeekToolCall]?
+    let reasoningContent: String?
+
+    init(
+        role: String,
+        content: JSONValue?,
+        name: String?,
+        toolCallID: String?,
+        toolCalls: [DeepSeekToolCall]?,
+        reasoningContent: String? = nil
+    ) {
+        self.role = role
+        self.content = content
+        self.name = name
+        self.toolCallID = toolCallID
+        self.toolCalls = toolCalls
+        self.reasoningContent = reasoningContent
+    }
 
     func jsonValue() -> JSONValue {
         var object: [String: JSONValue] = ["role": .string(role)]
         if let content { object["content"] = content }
+        if let reasoningContent {
+            object["reasoning_content"] = .string(reasoningContent)
+        }
         if let name { object["name"] = .string(name) }
         if let toolCallID { object["tool_call_id"] = .string(toolCallID) }
         if let toolCalls {
@@ -55,8 +112,15 @@ final class DeepSeekPlanner: ActionPlanner {
     private let apiKey: String
     private let session: URLSession
 
-    init(apiKey: String, session: URLSession = .shared) {
+    private let thinking: DeepSeekThinking
+
+    init(
+        apiKey: String,
+        thinking: DeepSeekThinking = .off,
+        session: URLSession = .shared
+    ) {
         self.apiKey = apiKey
+        self.thinking = thinking
         self.session = session
     }
 
@@ -68,13 +132,7 @@ final class DeepSeekPlanner: ActionPlanner {
         request.httpMethod = "POST"
         request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        let body: JSONValue = .object([
-            "model": .string("deepseek-flash"),
-            "messages": .array(context.messages.map { $0.jsonValue() }),
-            "tools": .array(Self.tools),
-            "tool_choice": .string("auto"),
-            "stream": .bool(false),
-        ])
+        let body = Self.body(messages: context.messages, thinking: thinking)
         request.httpBody = try JSONEncoder().encode(body)
         let (data, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
@@ -105,14 +163,33 @@ final class DeepSeekPlanner: ActionPlanner {
             return DeepSeekToolCall(id: id, name: name, arguments: parsedObject)
         }
         let content = message["content"]
+        let reasoningContent = message["reasoning_content"]?.stringValue
         let assistant = DeepSeekMessage(
             role: "assistant",
             content: content,
             name: nil,
             toolCallID: nil,
-            toolCalls: calls.isEmpty ? nil : calls
+            toolCalls: calls.isEmpty ? nil : calls,
+            reasoningContent: reasoningContent
         )
         return PlannerTurn(assistant: assistant, toolCalls: calls)
+    }
+
+    static func body(messages: [DeepSeekMessage], thinking: DeepSeekThinking) -> JSONValue {
+        var object: [String: JSONValue] = [
+            "model": .string("deepseek-flash"),
+            "messages": .array(messages.map { $0.jsonValue() }),
+            "tools": .array(Self.tools),
+            "tool_choice": .string("auto"),
+            "stream": .bool(false),
+            "thinking": .object([
+                "type": .string(thinking == .off ? "disabled" : "enabled"),
+            ]),
+        ]
+        if thinking != .off {
+            object["reasoning_effort"] = .string(thinking == .low ? "low" : "high")
+        }
+        return .object(object)
     }
 
     static let tools: [JSONValue] = [
@@ -179,6 +256,39 @@ final class DeepSeekPlanner: ActionPlanner {
 
 protocol ActionPlanner {
     func next(_ ctx: PlannerContext) async throws -> PlannerTurn
+}
+
+@MainActor
+final class CascadePlanner: ActionPlanner {
+    private let jev: ActionPlanner
+    private let deepSeek: ActionPlanner?
+    private var usingDeepSeek = false
+
+    init(jev: ActionPlanner, deepSeek: ActionPlanner?) {
+        self.jev = jev
+        self.deepSeek = deepSeek
+    }
+
+    func next(_ ctx: PlannerContext) async throws -> PlannerTurn {
+        if usingDeepSeek {
+            guard let deepSeek else {
+                assertionFailure("Jev escalation requires a DeepSeek planner")
+                throw AgentError.api("DeepSeek fallback is unavailable")
+            }
+            return try await deepSeek.next(ctx)
+        }
+        let turn = try await jev.next(ctx)
+        if case .toDeepSeek(let reason) = turn.escalation {
+            Log.agent.info("escalate to deepseek reason=\(reason, privacy: .public)")
+            usingDeepSeek = true
+            guard let deepSeek else {
+                assertionFailure("Jev escalation requires a DeepSeek planner")
+                throw AgentError.api("DeepSeek fallback is unavailable")
+            }
+            return try await deepSeek.next(ctx)
+        }
+        return turn
+    }
 }
 
 enum AgentError: Error, LocalizedError {
