@@ -186,6 +186,7 @@ final class AgentRunner: ObservableObject {
         )
         let deadline = Date().addingTimeInterval(90)
         var callCount = 0
+        var previousWindowTitle: String?
 
         do {
             while Date() < deadline {
@@ -199,6 +200,7 @@ final class AgentRunner: ObservableObject {
                 }
                 callCount += 1
                 let started = Date()
+                let windowTitleBeforeMutation = lastWindowTitle
                 let elementBeforeMutation: CuaElement? = {
                     guard ["click", "type_text"].contains(call.name),
                           let token = call.arguments["element_token"]?.stringValue else {
@@ -230,6 +232,10 @@ final class AgentRunner: ObservableObject {
                     ))
                     plannerContext.snapshot = lastSnapshot
                     plannerContext.windowTitle = lastWindowTitle
+                    if ["click", "click_at", "type_text", "press_key", "open_app"].contains(call.name) {
+                        previousWindowTitle = windowTitleBeforeMutation
+                    }
+                    plannerContext.previousWindowTitle = previousWindowTitle
                     plannerContext.targetApp = targetApp
                     plannerContext.typedTextVisible = typedTextVisible(
                         goal: goal,
@@ -282,6 +288,7 @@ final class AgentRunner: ObservableObject {
                     ))
                     plannerContext.snapshot = lastSnapshot
                     plannerContext.windowTitle = lastWindowTitle
+                    plannerContext.previousWindowTitle = previousWindowTitle
                     plannerContext.targetApp = targetApp
                     plannerContext.typedTextVisible = typedTextVisible(
                         goal: goal,

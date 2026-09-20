@@ -204,6 +204,167 @@ final class JevStepPlannerTests: XCTestCase {
     }
 
     @MainActor
+    func testGoalOverlapRanksMatchingControlAndReranksLowConfidenceChoice() async throws {
+        let fake = FakeJev(
+            answer: .choice(
+                choice: "e2",
+                confidence: 0.45,
+                probabilities: ["e1": 0.6, "e2": 0.8]
+            )
+        )
+        let planner = JevStepPlanner(client: fake, canEscalate: false)
+        let turn = try await planner.next(PlannerContext(
+            goal: "change the model",
+            snapshot: snapshot([
+                CuaElement(token: "tok-settings", role: "AXButton", label: "Settings", value: nil),
+                CuaElement(token: "tok-model", role: "AXPopUpButton", label: "Model: Claude", value: nil),
+                CuaElement(token: "tok-new", role: "AXButton", label: "New session", value: nil),
+            ])
+        ))
+        XCTAssertEqual(turn.toolCalls.first?.name, "click")
+        XCTAssertEqual(turn.toolCalls.first?.arguments["element_token"]?.stringValue, "tok-model")
+        let state = try XCTUnwrap(fake.states.first?.objectValue)
+        XCTAssertEqual(state["elements"]?.arrayValue?.first?["label"]?.stringValue, "Model: Claude")
+        XCTAssertEqual(state["elements"]?.arrayValue?.first?["matches_request"]?.boolValue, true)
+        let criteria = try XCTUnwrap(fake.questions["next_action"]?.choiceCriteria)
+        XCTAssertTrue(criteria["e1"]??.contains("label matches the request") == true)
+    }
+
+    @MainActor
+    func testWrongSurfaceRuleEscapesAndExcludesClickedLabel() async throws {
+        let fake = FakeJev(
+            answer: .choice(choice: "e1", confidence: 0.9, probabilities: ["e1": 0.9])
+        )
+        let planner = JevStepPlanner(client: fake, canEscalate: false)
+        let first = try await planner.next(PlannerContext(
+            goal: "change the model",
+            windowTitle: "Settings",
+            previousWindowTitle: "Devin",
+            snapshot: snapshot([
+                CuaElement(token: "tok-settings", role: "AXButton", label: "Settings", value: nil),
+                CuaElement(token: "tok-model", role: "AXPopUpButton", label: "Model: Claude", value: nil),
+            ]),
+            history: [
+                PlannerStepRecord(
+                    tool: "click",
+                    argsSummary: "element_token=tok-settings",
+                    resultText: "Clicked",
+                    succeeded: true,
+                    elementRole: "AXButton",
+                    elementLabel: "Settings"
+                ),
+            ],
+            stepIndex: 1
+        ))
+        XCTAssertEqual(first.toolCalls.first?.name, "press_key")
+        XCTAssertEqual(first.toolCalls.first?.arguments["key"]?.stringValue, "escape")
+
+        let second = try await planner.next(PlannerContext(
+            goal: "change the model",
+            windowTitle: "Devin",
+            previousWindowTitle: "Settings",
+            snapshot: snapshot([
+                CuaElement(token: "tok-settings", role: "AXButton", label: "Settings", value: nil),
+                CuaElement(token: "tok-model", role: "AXPopUpButton", label: "Model: Claude", value: nil),
+            ]),
+            history: [
+                PlannerStepRecord(
+                    tool: "click",
+                    argsSummary: "element_token=tok-settings",
+                    resultText: "Clicked",
+                    succeeded: true,
+                    elementRole: "AXButton",
+                    elementLabel: "Settings"
+                ),
+                PlannerStepRecord(
+                    tool: "press_key",
+                    argsSummary: "key=escape",
+                    resultText: "Pressed escape",
+                    succeeded: true
+                ),
+            ],
+            stepIndex: 2
+        ))
+        XCTAssertEqual(second.toolCalls.first?.arguments["element_token"]?.stringValue, "tok-model")
+    }
+
+    @MainActor
+    func testWrongSurfaceNoulEscapesAndRecoveryCapIsTwo() async throws {
+        let fake = FakeJev(
+            answer: .choice(choice: "e1", confidence: 0.9, probabilities: ["e1": 0.9]),
+            wrongSurface: 0.9
+        )
+        let planner = JevStepPlanner(client: fake, canEscalate: false)
+        let baseHistory = [
+            PlannerStepRecord(
+                tool: "click",
+                argsSummary: "element_token=tok-settings",
+                resultText: "Clicked",
+                succeeded: true,
+                elementRole: "AXButton",
+                elementLabel: "Settings"
+            ),
+        ]
+        let first = try await planner.next(PlannerContext(
+            goal: "change the model",
+            windowTitle: "Settings",
+            previousWindowTitle: "Devin",
+            snapshot: snapshot([
+                CuaElement(token: "tok-settings", role: "AXButton", label: "Settings", value: nil),
+                CuaElement(token: "tok-model", role: "AXPopUpButton", label: "Model: Claude", value: nil),
+            ]),
+            history: baseHistory,
+            stepIndex: 1
+        ))
+        XCTAssertEqual(first.toolCalls.first?.arguments["key"]?.stringValue, "escape")
+
+        let second = try await planner.next(PlannerContext(
+            goal: "change the model",
+            windowTitle: "Settings",
+            snapshot: snapshot([
+                CuaElement(token: "tok-settings", role: "AXButton", label: "Settings", value: nil),
+                CuaElement(token: "tok-model", role: "AXPopUpButton", label: "Model: Claude", value: nil),
+            ]),
+            history: baseHistory + [
+                PlannerStepRecord(
+                    tool: "press_key",
+                    argsSummary: "key=escape",
+                    resultText: "Pressed escape",
+                    succeeded: true
+                ),
+            ],
+            stepIndex: 2
+        ))
+        XCTAssertEqual(second.toolCalls.first?.arguments["key"]?.stringValue, "w")
+        XCTAssertEqual(second.toolCalls.first?.arguments["modifiers"]?.arrayValue?.first?.stringValue, "command")
+
+        let third = try await planner.next(PlannerContext(
+            goal: "change the model",
+            windowTitle: "Settings",
+            snapshot: snapshot([
+                CuaElement(token: "tok-settings", role: "AXButton", label: "Settings", value: nil),
+                CuaElement(token: "tok-model", role: "AXPopUpButton", label: "Model: Claude", value: nil),
+            ]),
+            history: baseHistory + [
+                PlannerStepRecord(
+                    tool: "press_key",
+                    argsSummary: "key=escape",
+                    resultText: "Pressed escape",
+                    succeeded: true
+                ),
+                PlannerStepRecord(
+                    tool: "press_key",
+                    argsSummary: "key=w modifiers=command",
+                    resultText: "Pressed command-w",
+                    succeeded: true
+                ),
+            ],
+            stepIndex: 3
+        ))
+        XCTAssertEqual(third.toolCalls.first?.name, "click")
+    }
+
+    @MainActor
     func testElectronLikeSnapshotWithUnobservableValueCanReturnDone() async throws {
         let fake = FakeJev(
             answer: .choice(choice: "done", confidence: 0.9, probabilities: ["done": 0.9]),
@@ -364,15 +525,18 @@ final class JevStepPlannerTests: XCTestCase {
 private final class FakeJev: JevAnswering {
     let answer: Answer
     let goalReached: Double
+    let wrongSurface: Double
     var states: [JSONValue] = []
     var questions: [String: Question] = [:]
 
     init(
         answer: Answer = .choice(choice: "stuck", confidence: 0.9, probabilities: ["stuck": 0.9]),
-        goalReached: Double = 0
+        goalReached: Double = 0,
+        wrongSurface: Double = 0
     ) {
         self.answer = answer
         self.goalReached = goalReached
+        self.wrongSurface = wrongSurface
     }
 
     func systemOne(
@@ -386,6 +550,7 @@ private final class FakeJev: JevAnswering {
             answers: [
                 "next_action": answer,
                 "goal_reached": .noul(goalReached),
+                "wrong_surface": .noul(wrongSurface),
                 "needs_text": .noul(0.8),
             ],
             usage: nil
