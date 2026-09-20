@@ -582,7 +582,7 @@ final class AgentRunner: ObservableObject {
                 let candidateSnapshot = try await CuaDriver.shared.windowState(
                     pid: app.pid,
                     windowId: candidate.id,
-                    includeImage: false
+                    includeImage: wantsImage && Permission.screenRecording.isGranted
                 )
                 let treeElapsed = Date().timeIntervalSince(treeStarted)
                 cuaSeconds += treeElapsed
@@ -610,15 +610,15 @@ final class AgentRunner: ObservableObject {
             }
         }
         let window = chosenWindow ?? firstSnapshotWindow ?? firstCandidate
-        guard let snapshot = snapshot ?? firstSnapshot else {
+        guard let selectedSnapshot = snapshot ?? firstSnapshot else {
             throw firstError ?? CuaDriverError.malformedResponse
         }
-        _ = snapshot
         return try await observeWindow(
             app: app,
             window: window,
             includeImage: wantsImage,
-            reportedApps: reportedApps
+            reportedApps: reportedApps,
+            snapshot: selectedSnapshot
         )
     }
 
@@ -626,23 +626,29 @@ final class AgentRunner: ObservableObject {
         app: CuaApp,
         window: CuaWindow,
         includeImage: Bool,
-        reportedApps: [CuaApp]
+        reportedApps: [CuaApp],
+        snapshot: CuaSnapshot?
     ) async throws -> ToolOutput {
         Log.cua.info(
             "chosen window title=\(window.title, privacy: .public) app=\(app.name, privacy: .public)"
         )
-        let treeStarted = Date()
-        let snapshot = try await CuaDriver.shared.windowState(
-            pid: app.pid,
-            windowId: window.id,
-            includeImage: includeImage && Permission.screenRecording.isGranted
-        )
-        let treeElapsed = Date().timeIntervalSince(treeStarted)
-        cuaSeconds += treeElapsed
-        Log.agent.info("stage=tree elapsed=\(treeElapsed)")
+        let resolvedSnapshot: CuaSnapshot
+        if let providedSnapshot = snapshot {
+            resolvedSnapshot = providedSnapshot
+        } else {
+            let treeStarted = Date()
+            resolvedSnapshot = try await CuaDriver.shared.windowState(
+                pid: app.pid,
+                windowId: window.id,
+                includeImage: includeImage && Permission.screenRecording.isGranted
+            )
+            let treeElapsed = Date().timeIntervalSince(treeStarted)
+            cuaSeconds += treeElapsed
+            Log.agent.info("stage=tree elapsed=\(treeElapsed)")
+        }
         lastCDPTitle = nil
         lastCDPPort = nil
-        var mergedSnapshot = snapshot
+        var mergedSnapshot = resolvedSnapshot
         let interactiveRoles: Set<String> = [
             "AXButton", "AXLink", "AXTextField", "AXTextArea", "AXMenuItem",
             "AXTab", "AXCheckBox", "AXRadioButton", "AXPopUpButton", "AXComboBox",
@@ -660,7 +666,7 @@ final class AgentRunner: ObservableObject {
             }
             if Self.shouldTryCDP(
                 bundleId: app.bundleId,
-                interactiveCount: snapshot.elements.filter {
+                interactiveCount: resolvedSnapshot.elements.filter {
                     cdpInteractiveRoles.contains($0.role)
                 }.count
             ),
@@ -671,10 +677,10 @@ final class AgentRunner: ObservableObject {
                ),
                !cdpElements.isEmpty {
                 mergedSnapshot = CuaSnapshot(
-                    snapshotId: snapshot.snapshotId,
-                    treeMarkdown: snapshot.treeMarkdown,
-                    elements: snapshot.elements + cdpElements,
-                    image: snapshot.image
+                    snapshotId: resolvedSnapshot.snapshotId,
+                    treeMarkdown: resolvedSnapshot.treeMarkdown,
+                    elements: resolvedSnapshot.elements + cdpElements,
+                    image: resolvedSnapshot.image
                 )
                 lastCDPTitle = window.title
                 lastCDPPort = Config.shared.cdpPort
@@ -704,7 +710,7 @@ final class AgentRunner: ObservableObject {
             }.joined(separator: "\n")
             treeSource = ordered
         } else {
-            treeSource = snapshot.treeMarkdown
+            treeSource = resolvedSnapshot.treeMarkdown
         }
         let tree = String(treeSource.prefix(14000))
         let shownLines = tree.split(separator: "\n").count
@@ -712,7 +718,7 @@ final class AgentRunner: ObservableObject {
         let text = "Running apps: \(reportedApps.map(\.name).joined(separator: ", ")); " +
             "frontmost window: \(window.title). Elements: \(mergedSnapshot.elements.count).\n" +
             "\(tree)\(omitted > 0 ? "\n… \(omitted) more" : "")\(extra)"
-        return ToolOutput(text: text, content: text, image: snapshot.image)
+        return ToolOutput(text: text, content: text, image: resolvedSnapshot.image)
     }
 
     static func shouldTryCDP(bundleId: String?, interactiveCount: Int) -> Bool {
@@ -784,7 +790,8 @@ final class AgentRunner: ObservableObject {
                         frame: nil
                     ),
                     includeImage: false,
-                    reportedApps: cachedApps ?? [app]
+                    reportedApps: cachedApps ?? [app],
+                    snapshot: nil
                 )
             } catch {
                 observation = try await observe([:])
