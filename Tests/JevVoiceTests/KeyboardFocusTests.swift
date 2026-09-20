@@ -19,4 +19,19 @@ final class KeyboardFocusTests: XCTestCase {
     func testMissingValueDoesNotConfirm() {
         XCTAssertFalse(KeyboardFocus.confirmsTyped(value: nil, expected: "hello"))
     }
+
+    func testReadBackDistinguishesMissingAndUnobservable() {
+        XCTAssertEqual(
+            KeyboardFocus.readBack(value: "hello world", expected: "world"),
+            .confirmed
+        )
+        XCTAssertEqual(
+            KeyboardFocus.readBack(value: "hello", expected: "world"),
+            .missing
+        )
+        XCTAssertEqual(
+            KeyboardFocus.readBack(value: nil, expected: "world"),
+            .unobservable
+        )
+    }
 }

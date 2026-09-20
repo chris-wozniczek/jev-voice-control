@@ -4,6 +4,12 @@ import CoreGraphics
 import Foundation
 
 enum KeyboardFocus {
+    enum ReadBack: Equatable {
+        case confirmed
+        case missing
+        case unobservable
+    }
+
     static let textRoles: Set<String> = [
         "AXTextField",
         "AXTextArea",
@@ -69,6 +75,11 @@ enum KeyboardFocus {
                 .lowercased()
         }
         return collapse(value).contains(collapse(expected))
+    }
+
+    static func readBack(value: String?, expected: String) -> ReadBack {
+        guard value != nil else { return .unobservable }
+        return confirmsTyped(value: value, expected: expected) ? .confirmed : .missing
     }
 
     static func typeUnicode(_ text: String) {

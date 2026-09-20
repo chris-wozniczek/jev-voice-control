@@ -1116,22 +1116,53 @@ final class AgentRunner: ObservableObject {
     }
 
     private func verifiedTypingResult(pid: Int, text: String, fallback: String) -> String {
-        guard let focused = KeyboardFocus.focusedElement(pid: pid_t(pid)),
-              KeyboardFocus.confirmsTyped(value: focused.value, expected: text) else {
+        let firstReadBack: KeyboardFocus.ReadBack
+        if let focused = KeyboardFocus.focusedElement(pid: pid_t(pid)),
+           KeyboardFocus.textRoles.contains(focused.role) {
+            firstReadBack = KeyboardFocus.readBack(value: focused.value, expected: text)
+        } else {
+            firstReadBack = .unobservable
+        }
+        switch firstReadBack {
+        case .confirmed:
+            return fallback
+        case .unobservable:
+            Log.agent.info("type readback=unobservable")
+            return "\(fallback) (unverified)"
+        case .missing:
             Log.agent.info("type readback=miss")
             KeyboardFocus.typeUnicode(text)
-            let readback = KeyboardFocus.focusedElement(pid: pid_t(pid))?.value
-            guard KeyboardFocus.confirmsTyped(value: readback, expected: text) else {
+            let secondReadBack: KeyboardFocus.ReadBack
+            if let focused = KeyboardFocus.focusedElement(pid: pid_t(pid)),
+               KeyboardFocus.textRoles.contains(focused.role) {
+                secondReadBack = KeyboardFocus.readBack(value: focused.value, expected: text)
+            } else {
+                secondReadBack = .unobservable
+            }
+            switch secondReadBack {
+            case .confirmed:
+                return fallback
+            case .unobservable:
+                Log.agent.info("type readback=unobservable")
+                return "\(fallback) (unverified)"
+            case .missing:
                 return "Typed \(text) but the field did not show it"
             }
-            return fallback
         }
-        return fallback
     }
 
     private func typedTextVisible(goal: String, snapshot: CuaSnapshot?) -> Bool? {
         guard let expected = SlotExtractor.typedText(from: goal) else { return nil }
         guard let snapshot else { return false }
+        let textElements = snapshot.elements.filter {
+            KeyboardFocus.textRoles.contains($0.role)
+        }
+        guard textElements.contains(where: {
+            guard let value = $0.value else { return false }
+            return !value.isEmpty
+        }) else {
+            return nil
+        }
         return snapshot.elements.contains {
             KeyboardFocus.confirmsTyped(value: $0.value, expected: expected)
                 || KeyboardFocus.confirmsTyped(value: $0.label, expected: expected)
