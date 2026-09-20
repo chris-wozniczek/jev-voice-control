@@ -70,28 +70,50 @@ public enum SlotExtractor {
         let trimmed = clause.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty,
               trimmed.range(of: #"[“”"]|(?:^|\s)'[^']*(?:'|$)"#,
-                            options: [.regularExpression, .caseInsensitive]) == nil,
+                        options: [.regularExpression, .caseInsensitive]) == nil,
               trimmed.range(of: #"\b(?:saying|that says)\b"#,
-                            options: [.regularExpression, .caseInsensitive]) == nil,
-              let match = trimmed.range(
-                of: #"^\s*(?:write|type|compose|draft|reply\s+with|answer\s+with)\b"#,
-                options: [.regularExpression, .caseInsensitive]
-              ) else {
+                            options: [.regularExpression, .caseInsensitive]) == nil else {
+            return nil
+        }
+        let postWords = trimmed.split(whereSeparator: \.isWhitespace).map(String.init)
+        if postWords.count >= 5,
+           postWords[0].caseInsensitiveCompare("post") == .orderedSame,
+           postWords[1].caseInsensitiveCompare("on") == .orderedSame,
+           let aboutIndex = postWords.firstIndex(where: {
+               $0.caseInsensitiveCompare("about") == .orderedSame
+           }) {
+            let postBrief = postWords[aboutIndex...].joined(separator: " ")
+            return postBrief.isEmpty ? nil : postBrief
+        }
+        if let postRange = trimmed.range(
+            of: #"^\s*post\s+(?:about|on)\b"#,
+            options: [.regularExpression, .caseInsensitive]
+        ) {
+            let postBrief = trimmed[postRange.upperBound...]
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            return postBrief.isEmpty ? nil : "about \(postBrief)"
+        }
+        guard let match = trimmed.range(
+            of: #"^\s*(?:write|type|compose|draft|reply\s+with|answer\s+with)\b"#,
+            options: [.regularExpression, .caseInsensitive]
+        ) else {
             return nil
         }
         let brief = trimmed[match.upperBound...]
             .trimmingCharacters(in: .whitespacesAndNewlines)
         guard !brief.isEmpty else { return nil }
         let hasArticleAndNoun = brief.range(
-            of: #"\b(?:a|an)\b\s+.*\b(?:note|message|reply|email|apology|apologising|apologizing|summary|paragraph|text|thank[- ]you|response)\b"#,
+            of: #"\b(?:a|an)\b\s+.*\b(?:post|tweet|thread|comment|caption|announcement|status\s+update|reply|bio|note|message|email|apology|apologising|apologizing|summary|paragraph|text|thank[- ]you|response)\b"#,
             options: [.regularExpression, .caseInsensitive]
         ) != nil
         let hasOwnWordsCue = brief.range(
             of: #"\b(?:in my own words|something like|apologising|apologizing)\b"#,
             options: [.regularExpression, .caseInsensitive]
         ) != nil
-        guard hasArticleAndNoun || hasOwnWordsCue else { return nil }
-        return brief
+        if hasArticleAndNoun || hasOwnWordsCue {
+            return brief
+        }
+        return nil
     }
 
     public static func typedText(from clause: String) -> String? {

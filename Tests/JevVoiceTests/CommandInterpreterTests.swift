@@ -100,4 +100,22 @@ final class CommandInterpreterTests: XCTestCase {
             )
         )
     }
+
+    func testSiteUITaskUsesDefaultBrowserAndHost() {
+        let decisions = CommandInterpreter.localDecisions(
+            clause: "open github",
+            installedApps: [],
+            aliases: [:],
+            frontmostApp: nil
+        )
+        XCTAssertNil(decisions)
+        let compose = CommandInterpreter.localDecisions(
+            clause: "compose a post on X about cats",
+            installedApps: [],
+            aliases: [:],
+            frontmostApp: nil
+        )
+        XCTAssertEqual(compose?.first?.siteHost, "x.com")
+        XCTAssertEqual(compose?.first?.targetApp, "Google Chrome")
+    }
 }

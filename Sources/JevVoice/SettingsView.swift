@@ -97,6 +97,14 @@ struct SettingsView: View {
                             Toggle("Let Jev operate apps (Cua)", isOn: $config.computerUseEnabled)
                                 .toggleStyle(.switch)
                                 .controlSize(.small)
+                            Picker("Default browser", selection: $config.defaultBrowser) {
+                                ForEach(["Google Chrome", "Safari", "Arc", "Brave Browser", "Firefox"], id: \.self) {
+                                    Text($0).tag($0)
+                                }
+                            }
+                            Text("Used when a command names a site without a browser.")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
                             Toggle("App shortcuts (app-actions.json)", isOn: $config.appActionsEnabled)
                                 .toggleStyle(.switch)
                                 .controlSize(.small)

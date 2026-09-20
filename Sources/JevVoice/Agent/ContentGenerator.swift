@@ -4,6 +4,7 @@ import JevVoiceCore
 struct ComposeContext {
     var app: String?
     var windowTitle: String?
+    var siteHost: String?
     var maxCharacters: Int = 600
 }
 
@@ -69,13 +70,24 @@ struct OpenAICompatibleGenerator: ContentGenerating {
         endpoint: URL,
         thinking: DeepSeekThinking?
     ) -> JSONValue {
-        let system = "You write short text that will be typed on the user's behalf. Output only the text to type — no quotes, no preamble, no markdown, no sign-off placeholders. Plain, natural, ≤ \(context.maxCharacters) characters. Language: same as the request."
+        let siteLimit = context.siteHost?.caseInsensitiveCompare("x.com") == .orderedSame
+            ? 280 : context.maxCharacters
+        var system = "You write short text that will be typed on the user's behalf. Output only the text to type — no quotes, no preamble, no markdown, no sign-off placeholders. Plain, natural, ≤ \(siteLimit) characters. Language: same as the request."
+        if let host = context.siteHost {
+            system += " Write it as a post or reply for \(host)."
+            if host.caseInsensitiveCompare("x.com") == .orderedSame {
+                system += " No hashtags unless asked."
+            }
+        }
         var user = brief
         if let app = context.app, !app.isEmpty {
             user += "\nApp: \(app)"
         }
         if let windowTitle = context.windowTitle, !windowTitle.isEmpty {
             user += "\nWindow: \(windowTitle)"
+        }
+        if let host = context.siteHost, !host.isEmpty {
+            user += "\nSite: \(host)"
         }
         var object: [String: JSONValue] = [
             "model": .string(model),

@@ -145,7 +145,9 @@ final class AgentRunner: ObservableObject {
            let action = AppActionRegistry.shared.match(
                goal: goal,
                appName: targetApp,
-               bundleId: nil
+               bundleId: nil,
+               windowTitle: lastWindowTitle,
+               url: nil
            ) {
             effectivePlanner = FastPathPlanner(action: action, inner: planner)
             Log.agent.info(
@@ -178,6 +180,7 @@ final class AgentRunner: ObservableObject {
             ],
             goal: goal,
             targetApp: targetApp,
+            siteHost: context.siteHost,
             windowTitle: nil,
             generatedText: context.generatedText,
             snapshot: nil,
@@ -186,6 +189,8 @@ final class AgentRunner: ObservableObject {
         )
         let deadline = Date().addingTimeInterval(90)
         var callCount = 0
+        var previousWindowTitle: String?
+        var siteShortcutIssued = false
 
         do {
             while Date() < deadline {
@@ -199,6 +204,7 @@ final class AgentRunner: ObservableObject {
                 }
                 callCount += 1
                 let started = Date()
+                let windowTitleBeforeMutation = lastWindowTitle
                 let elementBeforeMutation: CuaElement? = {
                     guard ["click", "type_text"].contains(call.name),
                           let token = call.arguments["element_token"]?.stringValue else {
@@ -230,6 +236,10 @@ final class AgentRunner: ObservableObject {
                     ))
                     plannerContext.snapshot = lastSnapshot
                     plannerContext.windowTitle = lastWindowTitle
+                    if ["click", "click_at", "type_text", "press_key", "open_app"].contains(call.name) {
+                        previousWindowTitle = windowTitleBeforeMutation
+                    }
+                    plannerContext.previousWindowTitle = previousWindowTitle
                     plannerContext.targetApp = targetApp
                     plannerContext.typedTextVisible = typedTextVisible(
                         goal: goal,
@@ -243,6 +253,41 @@ final class AgentRunner: ObservableObject {
                         elementRole: elementBeforeMutation?.role,
                         elementLabel: elementBeforeMutation?.label
                     ))
+                    if call.name == "observe",
+                       !siteShortcutIssued,
+                       context.siteHost != nil,
+                       context.generatedText != nil,
+                       !(lastSnapshot?.elements.contains {
+                           KeyboardFocus.textRoles.contains($0.role)
+                       } ?? false),
+                       let action = AppActionRegistry.shared.actions.first(where: {
+                           $0.site?.caseInsensitiveCompare(context.siteHost ?? "") == .orderedSame
+                               && $0.name.caseInsensitiveCompare("compose post") == .orderedSame
+                       }),
+                       case .key(let key, let modifiers) = action.steps.first {
+                        siteShortcutIssued = true
+                        let shortcut = DeepSeekToolCall(
+                            id: "site-shortcut-\(callCount)",
+                            name: "press_key",
+                            arguments: [
+                                "key": .string(key),
+                                "modifiers": .array(modifiers.map(JSONValue.string)),
+                            ]
+                        )
+                        let shortcutOutput = try await execute(shortcut)
+                        plannerContext.messages.append(toolMessage(
+                            id: shortcut.id,
+                            content: shortcutOutput.content,
+                            image: shortcutOutput.image
+                        ))
+                        plannerContext.history.append(PlannerStepRecord(
+                            tool: shortcut.name,
+                            argsSummary: summarize(shortcut.arguments),
+                            resultText: shortcutOutput.text,
+                            succeeded: true
+                        ))
+                        continue
+                    }
                     if call.name == "click" || call.name == "type_text",
                        let app = targetApp,
                        let role = elementBeforeMutation?.role,
@@ -282,6 +327,7 @@ final class AgentRunner: ObservableObject {
                     ))
                     plannerContext.snapshot = lastSnapshot
                     plannerContext.windowTitle = lastWindowTitle
+                    plannerContext.previousWindowTitle = previousWindowTitle
                     plannerContext.targetApp = targetApp
                     plannerContext.typedTextVisible = typedTextVisible(
                         goal: goal,
@@ -1222,10 +1268,12 @@ final class AgentRunner: ObservableObject {
 
 struct AgentContext {
     var frontmostApp: String?
+    var siteHost: String?
     var generatedText: String?
 
-    init(frontmostApp: String? = nil, generatedText: String? = nil) {
+    init(frontmostApp: String? = nil, siteHost: String? = nil, generatedText: String? = nil) {
         self.frontmostApp = frontmostApp
+        self.siteHost = siteHost
         self.generatedText = generatedText
     }
 }

@@ -29,10 +29,17 @@ final class JevStepPlanner: ActionPlanner {
     private struct Candidate {
         let id: String
         let element: CuaElement
+        let overlap: Int
 
         var elementRoleIsText: Bool {
             ["AXTextField", "AXTextArea", "AXSearchField"].contains(element.role)
         }
+    }
+
+    private struct RankedCandidate {
+        let originalIndex: Int
+        let element: CuaElement
+        let overlap: Int
     }
 
     private let client: JevAnswering
@@ -40,6 +47,10 @@ final class JevStepPlanner: ActionPlanner {
     private let hints: HintStore
     private var previousActionKey: String?
     private var previousFingerprint: String?
+    private var excludedLabels: Set<String> = []
+    private var recoveryCount = 0
+    private var wrongSurfaceTitle: String?
+    private var closeShortcutIssued = false
 
     private let interactiveRoles: Set<String> = [
         "AXButton", "AXLink", "AXTextField", "AXTextArea", "AXMenuItem",
@@ -67,7 +78,11 @@ final class JevStepPlanner: ActionPlanner {
             )
         }
 
-        let candidates = makeCandidates(snapshot.elements)
+        let candidates = makeCandidates(
+            snapshot.elements,
+            goal: ctx.goal,
+            excludedLabels: ctx.excludedLabels.union(excludedLabels)
+        )
         guard !candidates.isEmpty else {
             if canEscalate {
                 return escalation("no accessible controls")
@@ -97,7 +112,9 @@ final class JevStepPlanner: ActionPlanner {
         let state: JSONValue = .object([
             "goal": .string(ctx.goal),
             "app": ctx.targetApp.map(JSONValue.string) ?? .null,
+            "site": ctx.siteHost.map(JSONValue.string) ?? .null,
             "window_title": ctx.windowTitle.map(JSONValue.string) ?? .null,
+            "previous_window_title": ctx.previousWindowTitle.map(JSONValue.string) ?? .null,
             "step": .number(Double(ctx.stepIndex)),
             "previous_actions": .array(previousActions.map(JSONValue.string)),
             "worked_before": .array(workedBeforeDescriptions.map(JSONValue.string)),
@@ -109,6 +126,7 @@ final class JevStepPlanner: ActionPlanner {
                     "role": .string(promptRole(candidate.element.role)),
                     "label": .string(String(candidate.element.label.prefix(80))),
                     "value": candidate.element.value.map { .string(String($0.prefix(40))) } ?? .null,
+                    "matches_request": .bool(candidate.overlap > 0),
                 ])
             }),
         ])
@@ -123,9 +141,12 @@ final class JevStepPlanner: ActionPlanner {
             return (
                 candidate.id,
                 Optional(
-                    hasWorkedBefore
-                        ? "\(base) (worked before for a similar request)"
-                        : base
+                    [
+                        candidate.overlap > 0 ? "\(base) — label matches the request" : base,
+                        hasWorkedBefore ? "(worked before for a similar request)" : nil,
+                    ]
+                    .compactMap { $0 }
+                    .joined(separator: " ")
                 )
             )
         })
@@ -135,12 +156,15 @@ final class JevStepPlanner: ActionPlanner {
         criteria["done"] = "The goal is already complete"
         criteria["stuck"] = "No listed element can advance the goal"
         let instructions = """
-        The user said `\(ctx.goal)`. `elements` lists the controls currently visible in `\(ctx.targetApp ?? "the app")`; `previous_actions` are the steps already taken. Pick the single next action that moves the goal forward now. Pick `done` only if `elements` and `window_title` already show that the goal is completed. Pick `stuck` if no listed element can advance the goal.
+        The user said `\(ctx.goal)`. `elements` lists the controls currently visible in `\(ctx.targetApp ?? "the app")`; `previous_actions` are the steps already taken. \(ctx.siteHost.map { "The requested site is \($0). " } ?? "")Pick the single next action that moves the goal forward now. Pick `done` only if `elements` and `window_title` already show that the goal is completed. Pick `stuck` if no listed element can advance the goal.
         """
         let questions: [String: Question] = [
             "next_action": .choice(instructions: instructions, criteria: criteria),
             "goal_reached": .noul(
                 instructions: "Do `elements` and `window_title` show that `\(ctx.goal)` has already been fully completed?"
+            ),
+            "wrong_surface": .noul(
+                instructions: "Did the last action open a window or dialog (`window_title`) that is unrelated to `\(ctx.goal)` and should be closed to get back? `previous_window_title` is where we were before."
             ),
             "needs_text": .noul(
                 instructions: "Does completing `\(ctx.goal)` require typing text that is not yet visible in `elements`?"
@@ -172,6 +196,64 @@ final class JevStepPlanner: ActionPlanner {
         } else {
             needsText = 0
         }
+        let wrongSurfaceNoul: Double
+        if case .noul(let value) = response.answers["wrong_surface"] {
+            wrongSurfaceNoul = value
+        } else {
+            wrongSurfaceNoul = 0
+        }
+        if let pendingTitle = wrongSurfaceTitle,
+           ctx.windowTitle == pendingTitle,
+           ctx.history.last?.tool == "press_key",
+           ctx.history.last?.succeeded == true,
+           recoveryCount < 2,
+           !closeShortcutIssued {
+            closeShortcutIssued = true
+            recoveryCount += 1
+            Log.agent.info("stage=recover reason=wrong_surface shortcut=command-w")
+            return keyTurn(
+                id: "jev-\(ctx.stepIndex + 1)",
+                key: "w",
+                modifiers: ["command"]
+            )
+        }
+        if ctx.windowTitle != wrongSurfaceTitle {
+            closeShortcutIssued = false
+            if ctx.windowTitle != nil {
+                wrongSurfaceTitle = nil
+            }
+        }
+        let lastRecord = ctx.history.last
+        let wrongSurfaceByRule: Bool = {
+            guard let lastRecord,
+                  lastRecord.succeeded,
+                  lastRecord.tool == "click",
+                  let previous = ctx.previousWindowTitle,
+                  let current = ctx.windowTitle,
+                  previous != current,
+                  ["settings", "preferences", "about"].contains(where: {
+                      current.localizedCaseInsensitiveContains($0)
+                  }) else {
+                return false
+            }
+            return GoalWords.words(ctx.goal).isDisjoint(with: ["settings", "preferences", "about"])
+        }()
+        if (wrongSurfaceNoul >= 0.7 || wrongSurfaceByRule),
+           let label = lastRecord?.elementLabel,
+           lastRecord?.succeeded == true,
+           lastRecord?.tool == "click",
+           recoveryCount < 2 {
+            recoveryCount += 1
+            excludedLabels.insert(label)
+            wrongSurfaceTitle = ctx.windowTitle
+            closeShortcutIssued = false
+            Log.agent.info("stage=recover reason=wrong_surface label=\(label, privacy: .public)")
+            return keyTurn(
+                id: "jev-\(ctx.stepIndex + 1)",
+                key: "escape",
+                modifiers: []
+            )
+        }
         if goalReached >= 0.7,
            ctx.history.contains(where: { ["click", "click_at", "type_text", "press_key", "open_app"].contains($0.tool) }) {
             if textToType != nil, ctx.typedTextVisible == false {
@@ -193,9 +275,23 @@ final class JevStepPlanner: ActionPlanner {
         let fingerprint = snapshot.elements.map {
             "\($0.role)|\($0.label)|\($0.value ?? "")"
         }.joined(separator: "\n")
-        let selectedChoice = choice == "done" && goalReached < 0.7
+        var selectedChoice = choice == "done" && goalReached < 0.7
             ? highestAlternative(probabilities: probabilities)
             : choice
+        if let chosen = candidates.first(where: { $0.id == selectedChoice }),
+           chosen.overlap == 0,
+           !chosen.elementRoleIsText,
+           confidence < 0.6,
+           let reranked = candidates
+            .filter({ $0.overlap > 0 })
+            .max(by: {
+                (probabilities[$0.id] ?? 0) < (probabilities[$1.id] ?? 0)
+            }) {
+            selectedChoice = reranked.id
+            Log.agent.info(
+                "jev step rerank from=\(choice, privacy: .public) to=\(selectedChoice, privacy: .public)"
+            )
+        }
         let selectedCandidate = candidates.first { $0.id == selectedChoice }
         let selectedToken = selectedCandidate?.element.token
         let actionKey = "\(selectedChoice)|\(selectedToken ?? "")"
@@ -275,7 +371,11 @@ final class JevStepPlanner: ActionPlanner {
         }
     }
 
-    private func makeCandidates(_ elements: [CuaElement]) -> [Candidate] {
+    private func makeCandidates(
+        _ elements: [CuaElement],
+        goal: String,
+        excludedLabels: Set<String>
+    ) -> [Candidate] {
         let textRoles = Set(["AXTextField", "AXTextArea", "AXSearchField"])
         let interactiveCount = elements.filter {
             interactiveRoles.contains($0.role)
@@ -285,6 +385,7 @@ final class JevStepPlanner: ActionPlanner {
         let includeExtras = interactiveCount < 8
         var seen = Set<String>()
         let selected = elements.filter { element in
+            guard !excludedLabels.contains(element.label) else { return false }
             let hasLabel = !element.label.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             let isInteractive = interactiveRoles.contains(element.role)
                 && (hasLabel || textRoles.contains(element.role))
@@ -292,8 +393,24 @@ final class JevStepPlanner: ActionPlanner {
             let key = "\(element.role)|\(element.label)|\(element.value ?? "")"
             return seen.insert(key).inserted
         }.prefix(200)
-        return selected.enumerated().map { index, element in
-            Candidate(id: "e\(index + 1)", element: element)
+        let goalWords = GoalWords.words(goal)
+        var ranked: [RankedCandidate] = []
+        for (index, element) in selected.enumerated() {
+            let labelAndValue = "\(element.label) \(element.value ?? "")"
+            let overlap = goalWords.intersection(GoalWords.words(labelAndValue)).count
+            ranked.append(RankedCandidate(
+                originalIndex: index,
+                element: element,
+                overlap: overlap
+            ))
+        }
+        ranked.sort {
+            $0.overlap != $1.overlap
+                ? $0.overlap > $1.overlap
+                : $0.originalIndex < $1.originalIndex
+        }
+        return ranked.enumerated().map { index, item in
+            Candidate(id: "e\(index + 1)", element: item.element, overlap: item.overlap)
         }
     }
 
@@ -343,6 +460,17 @@ final class JevStepPlanner: ActionPlanner {
             "I'm not sure which control does that in \(app ?? "the app")",
             step: step
         )
+    }
+
+    private func keyTurn(id: String, key: String, modifiers: [String]) -> PlannerTurn {
+        makeTurn(call: DeepSeekToolCall(
+            id: id,
+            name: "press_key",
+            arguments: [
+                "key": .string(key),
+                "modifiers": .array(modifiers.map(JSONValue.string)),
+            ]
+        ))
     }
 
     private func highestAlternative(probabilities: [String: Double]) -> String {

@@ -220,7 +220,9 @@ final class VoiceController: ObservableObject {
         let interpreter = CommandInterpreter(
             client: client,
             installedApps: Array(registry.names.prefix(254)),
-            aliases: registry.aliases
+            aliases: registry.aliases,
+            siteResolver: WebSiteRegistry.shared.resolver,
+            defaultBrowser: config.defaultBrowser
         )
 
         var interpretationError: Error?
@@ -335,7 +337,10 @@ final class VoiceController: ObservableObject {
                     brief: decision.query ?? decision.clause,
                     context: ComposeContext(
                         app: decision.targetApp ?? lastExternalFrontmostApp,
-                        windowTitle: AgentRunner.shared.currentWindowTitle
+                        windowTitle: AgentRunner.shared.currentWindowTitle,
+                        siteHost: decision.siteHost,
+                        maxCharacters: decision.siteHost?.caseInsensitiveCompare("x.com") == .orderedSame
+                            ? 280 : 600
                     )
                 )
                 decisions[index].generatedText = generated
@@ -491,10 +496,14 @@ final class VoiceController: ObservableObject {
                     }
                     status = .executing
                     let target = decision.targetApp ?? lastExternalFrontmostApp
+                    if let siteHost = decision.siteHost {
+                        await ensureSiteOpen(host: siteHost, browser: target)
+                    }
                     let outcome = await AgentRunner.shared.run(
                         goal: decision.clause,
                         context: AgentContext(
                             frontmostApp: target,
+                            siteHost: decision.siteHost,
                             generatedText: decision.generatedText
                         )
                     )
@@ -520,6 +529,10 @@ final class VoiceController: ObservableObject {
                     }
                     continue
                 }
+                if decision.action == .dictate, decision.composes,
+                   let siteHost = decision.siteHost {
+                    await ensureSiteOpen(host: siteHost, browser: decision.targetApp ?? config.defaultBrowser)
+                }
                 if decision.action == .dictate,
                    let previousAction,
                    [.openApp, .switchApp, .openURL, .webSearch].contains(previousAction) {
@@ -527,7 +540,9 @@ final class VoiceController: ObservableObject {
                 }
                 let result = try await Executor.execute(
                     decision,
-                    frontmostApp: lastExternalFrontmostApp
+                    frontmostApp: decision.siteHost == nil
+                        ? lastExternalFrontmostApp
+                        : decision.targetApp
                 )
                 if decision.action == .dictate, decision.composes, decision.generatedText != nil {
                     let words = decision.generatedText?
@@ -565,6 +580,39 @@ final class VoiceController: ObservableObject {
             return "Add a TypeSafe API key in Settings to let Jev operate apps"
         }
         return "Add a DeepSeek API key in Settings to let Jev do open-ended tasks"
+    }
+
+    func ensureSiteOpen(host: String, browser: String?) async {
+        let started = Date()
+        let browserName = browser ?? config.defaultBrowser
+        func matches() -> Bool {
+            guard let app = NSWorkspace.shared.runningApplications.first(where: {
+                $0.localizedName?.caseInsensitiveCompare(browserName) == .orderedSame
+            }) else { return false }
+            return AXTreeReader.windowIdentifiers(pid: app.processIdentifier).contains {
+                $0.localizedCaseInsensitiveContains(host)
+            }
+        }
+        var opened = false
+        if !matches(), let url = URL(string: "https://\(host)") {
+            opened = true
+            _ = try? await Executor.execute(
+                Decision(
+                    clause: "open \(host)",
+                    action: .openURL,
+                    targetApp: browserName,
+                    url: url.absoluteString
+                )
+            )
+        }
+        let deadline = Date().addingTimeInterval(4)
+        while !matches(), Date() < deadline {
+            try? await Task.sleep(nanoseconds: 200_000_000)
+        }
+        let elapsed = Int(Date().timeIntervalSince(started) * 1000)
+        Log.command.info(
+            "stage=site host=\(host, privacy: .public) opened=\(opened) elapsed=\(elapsed)"
+        )
     }
 
     private func speakError(_ message: String) {

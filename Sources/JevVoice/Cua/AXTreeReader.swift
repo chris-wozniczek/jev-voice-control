@@ -151,6 +151,23 @@ enum AXTreeReader {
         "AXStaticText", "AXHeading", "AXImage", "AXLink", "AXMenuBarItem",
     ]
 
+    static func windowIdentifiers(pid: pid_t) -> [String] {
+        let app = AXUIElementCreateApplication(pid)
+        guard let value = axAttribute(app, kAXWindowsAttribute as CFString),
+              let windows = value as? [AXUIElement] else {
+            return []
+        }
+        return windows.flatMap { window in
+            [kAXTitleAttribute as CFString, kAXDocumentAttribute as CFString, "AXURL" as CFString]
+                .compactMap { attribute in
+                    guard let value = axAttribute(window, attribute) else { return nil }
+                    if let string = value as? String { return string }
+                    if let url = value as? URL { return url.absoluteString }
+                    return String(describing: value)
+                }
+        }
+    }
+
     private static let valueRoles: Set<String> = [
         "AXTextField", "AXTextArea", "AXSearchField", "AXCheckBox",
         "AXPopUpButton", "AXComboBox",

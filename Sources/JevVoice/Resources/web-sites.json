@@ -1,0 +1,12 @@
+{
+  "sites": [
+    {"host":"x.com","names":["x","x.com","x dot com","twitter"]},
+    {"host":"github.com","names":["github"]},
+    {"host":"youtube.com","names":["youtube"]},
+    {"host":"mail.google.com","names":["gmail"]},
+    {"host":"linkedin.com","names":["linkedin"]},
+    {"host":"reddit.com","names":["reddit"]},
+    {"host":"chatgpt.com","names":["chatgpt","chat gpt"]},
+    {"host":"grok.com","names":["grok"]}
+  ]
+}
