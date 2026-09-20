@@ -169,9 +169,9 @@ struct ContentView: View {
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.secondary)
                 Spacer()
-                if !agentRunner.isRunning {
+                if controller.status != .thinking && controller.status != .executing {
                     Button("Clear") {
-                        agentRunner.clearSteps()
+                        controller.clearHistory()
                     }
                     .buttonStyle(.plain)
                     .foregroundStyle(.secondary)
@@ -205,6 +205,12 @@ struct ContentView: View {
                         .buttonStyle(.borderedProminent)
                         .tint(.red)
                         .controlSize(.small)
+                } else {
+                    Button("Clear") {
+                        agentRunner.clearSteps()
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(.secondary)
                 }
             }
             ScrollView {

@@ -225,7 +225,7 @@ final class AgentTests: XCTestCase {
             CuaWindow(id: 1, title: "", frame: ["width": 1, "height": 1]),
             CuaWindow(id: 2, title: "Main", frame: ["width": 800, "height": 600]),
         ]
-        XCTAssertEqual(AgentRunner.pickWindow(windows), windows[1])
+        XCTAssertEqual(AgentRunner.pickWindow(windows, preferring: nil), windows[1])
     }
 
     @MainActor
@@ -234,7 +234,25 @@ final class AgentTests: XCTestCase {
             CuaWindow(id: 1, title: "", frame: ["width": 800, "height": 600]),
             CuaWindow(id: 2, title: "", frame: ["width": 900, "height": 700]),
         ]
-        XCTAssertEqual(AgentRunner.pickWindow(windows), windows[0])
+        XCTAssertEqual(AgentRunner.pickWindow(windows, preferring: nil), windows[0])
+    }
+
+    @MainActor
+    func testAgentPreservesLastWindowOverDriverOrder() {
+        let windows = [
+            CuaWindow(id: 1, title: "First", frame: ["width": 800, "height": 600]),
+            CuaWindow(id: 2, title: "Previously selected", frame: ["width": 900, "height": 700]),
+        ]
+        XCTAssertEqual(AgentRunner.pickWindow(windows, preferring: 2), windows[1])
+    }
+
+    @MainActor
+    func testAgentUsesFirstQualifyingWindowOverLargerLaterWindow() {
+        let windows = [
+            CuaWindow(id: 1, title: "First", frame: ["width": 300, "height": 200]),
+            CuaWindow(id: 2, title: "Larger", frame: ["width": 900, "height": 700]),
+        ]
+        XCTAssertEqual(AgentRunner.pickWindow(windows, preferring: nil), windows[0])
     }
 
     @MainActor

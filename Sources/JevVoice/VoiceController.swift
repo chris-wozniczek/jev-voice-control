@@ -115,6 +115,19 @@ final class VoiceController: ObservableObject {
         missingPermissions = Permission.missing
     }
 
+    func clearHistory() {
+        decisions = []
+        if case .done = status {
+            suggestions = []
+            suggestionClause = ""
+            status = .idle
+        } else if case .error = status {
+            suggestions = []
+            suggestionClause = ""
+            status = .idle
+        }
+    }
+
     func requestMissingPermissions() async {
         for permission in Permission.missing where permission.canPrompt {
             await permission.request()

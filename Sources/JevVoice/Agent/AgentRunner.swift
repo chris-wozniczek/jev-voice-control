@@ -286,9 +286,14 @@ final class AgentRunner: ObservableObject {
             frontmost = application.localizedName
         }
         let requested = explicit.flatMap { $0.isEmpty ? nil : $0 } ?? targetApp ?? frontmost
-        let app = reportedApps.first {
-            guard let requested else { return false }
-            return $0.name.localizedCaseInsensitiveContains(requested)
+        let app = requested.flatMap { requested in
+            reportedApps.first {
+                $0.name.caseInsensitiveCompare(requested) == .orderedSame
+            }
+        } ?? requested.flatMap { requested in
+            reportedApps.first {
+                $0.name.localizedCaseInsensitiveContains(requested)
+            }
         }
         guard let app else {
             let target = requested ?? "the target app"
@@ -299,7 +304,8 @@ final class AgentRunner: ObservableObject {
         }
         targetApp = app.name
         let windows = try await CuaDriver.shared.windows(pid: app.pid)
-        guard let window = Self.pickWindow(windows) else {
+        let preferredWindowID = app.pid == lastPID ? lastWindowID : nil
+        guard let window = Self.pickWindow(windows, preferring: preferredWindowID) else {
             lastPID = app.pid
             lastWindowID = nil
             lastSnapshot = nil
@@ -354,18 +360,20 @@ final class AgentRunner: ObservableObject {
         return ToolOutput(text: text, content: text, image: snapshot.image)
     }
 
-    static func pickWindow(_ windows: [CuaWindow]) -> CuaWindow? {
-        let qualifying = windows.filter { window in
+    static func pickWindow(_ windows: [CuaWindow], preferring lastWindowID: Int?) -> CuaWindow? {
+        if let lastWindowID,
+           let previous = windows.first(where: { $0.id == lastWindowID }) {
+            return previous
+        }
+        guard let qualifying = windows.first(where: { window in
             guard let frame = window.frame else { return false }
             return (frame["width"] ?? 0) >= 200
                 && (frame["height"] ?? 0) >= 150
                 && !window.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        }) else {
+            return windows.first
         }
-        return qualifying.max {
-            let lhs = ($0.frame?["width"] ?? 0) * ($0.frame?["height"] ?? 0)
-            let rhs = ($1.frame?["width"] ?? 0) * ($1.frame?["height"] ?? 0)
-            return lhs < rhs
-        } ?? windows.first
+        return qualifying
     }
 
     private func afterMutation(_ text: String) async throws -> ToolOutput {
