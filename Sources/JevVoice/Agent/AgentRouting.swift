@@ -59,6 +59,6 @@ extension VoiceController {
         case .cancelled:
             status = .idle
         }
-        onDone?()
+        completeTask()
     }
 }

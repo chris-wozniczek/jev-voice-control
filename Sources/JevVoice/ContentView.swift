@@ -20,6 +20,9 @@ struct ContentView: View {
                         if !controller.missingPermissions.isEmpty {
                             permissionsBanner
                         }
+                        if controller.config.computerUseEnabled && !Permission.screenRecording.isGranted {
+                            screenRecordingBanner
+                        }
                         transcriptCard
                         if !controller.suggestions.isEmpty {
                             suggestionSection
@@ -42,6 +45,7 @@ struct ContentView: View {
         }
         .frame(width: 380, height: 540)
         .background(.regularMaterial)
+        .onAppear { controller.refreshPermissions() }
     }
 
     // MARK: Header
@@ -56,7 +60,7 @@ struct ContentView: View {
                 StatusPill(status: controller.status)
             }
             Spacer()
-            if controller.latencyMs > 0 || !controller.model.isEmpty {
+            if controller.latencyMs > 0 || controller.taskSeconds > 0 || !controller.model.isEmpty {
                 Text(metaText)
                     .font(.caption2.monospacedDigit())
                     .foregroundStyle(.tertiary)
@@ -77,6 +81,9 @@ struct ContentView: View {
         var parts: [String] = []
         if !controller.model.isEmpty { parts.append(controller.model) }
         if controller.latencyMs > 0 { parts.append("\(Int(controller.latencyMs)) ms") }
+        if controller.taskSeconds > 0 {
+            parts.append("task \(String(format: "%.1f", controller.taskSeconds)) s")
+        }
         return parts.joined(separator: " · ")
     }
 
@@ -103,6 +110,23 @@ struct ContentView: View {
                         }
                         .controlSize(.small)
                     }
+                }
+            }
+        }
+    }
+
+    private var screenRecordingBanner: some View {
+        Card(tint: .orange) {
+            HStack(alignment: .top, spacing: 8) {
+                Image(systemName: "rectangle.inset.filled.and.person.filled")
+                    .foregroundStyle(.orange)
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Screen Recording is off — Jev can't fall back to screenshots when an app hides its controls.")
+                        .font(.caption)
+                    Button("Open Settings") {
+                        Permission.screenRecording.openSystemSettings()
+                    }
+                    .controlSize(.small)
                 }
             }
         }
