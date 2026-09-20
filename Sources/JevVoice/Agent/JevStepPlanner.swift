@@ -346,7 +346,10 @@ final class JevStepPlanner: ActionPlanner {
     }
 
     private func promptRole(_ role: String) -> String {
-        role.replacingOccurrences(of: "AX", with: "").lowercased()
+        if role == "AXStaticText" {
+            return "text"
+        }
+        return role.replacingOccurrences(of: "AX", with: "").lowercased()
     }
 
     private func summary(for goal: String) -> String {
