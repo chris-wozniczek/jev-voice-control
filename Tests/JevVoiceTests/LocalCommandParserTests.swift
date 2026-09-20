@@ -63,4 +63,17 @@ final class LocalCommandParserTests: XCTestCase {
             frontmostApp: "Safari"
         ))
     }
+
+    func testComposeClauseUsesGeneratedDictation() {
+        let decision = LocalCommandParser.parse(
+            clause: "write a note apologising for the delay",
+            installedApps: apps,
+            aliases: AppMatcher.builtInAliases,
+            frontmostApp: "Safari"
+        )
+        XCTAssertEqual(decision?.action, .dictate)
+        XCTAssertTrue(decision?.composes == true)
+        XCTAssertNil(decision?.text)
+        XCTAssertEqual(decision?.query, "a note apologising for the delay")
+    }
 }

@@ -66,6 +66,34 @@ public enum SlotExtractor {
         return text.isEmpty ? nil : text
     }
 
+    public static func composeRequest(from clause: String) -> String? {
+        let trimmed = clause.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty,
+              trimmed.range(of: #"[“”"]|(?:^|\s)'[^']*(?:'|$)"#,
+                            options: [.regularExpression, .caseInsensitive]) == nil,
+              trimmed.range(of: #"\b(?:saying|that says)\b"#,
+                            options: [.regularExpression, .caseInsensitive]) == nil,
+              let match = trimmed.range(
+                of: #"^\s*(?:write|type|compose|draft|reply\s+with|answer\s+with)\b"#,
+                options: [.regularExpression, .caseInsensitive]
+              ) else {
+            return nil
+        }
+        let brief = trimmed[match.upperBound...]
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !brief.isEmpty else { return nil }
+        let hasArticleAndNoun = brief.range(
+            of: #"\b(?:a|an)\b\s+.*\b(?:note|message|reply|email|apology|apologising|apologizing|summary|paragraph|text|thank[- ]you|response)\b"#,
+            options: [.regularExpression, .caseInsensitive]
+        ) != nil
+        let hasOwnWordsCue = brief.range(
+            of: #"\b(?:in my own words|something like|apologising|apologizing)\b"#,
+            options: [.regularExpression, .caseInsensitive]
+        ) != nil
+        guard hasArticleAndNoun || hasOwnWordsCue else { return nil }
+        return brief
+    }
+
     public static func typedText(from clause: String) -> String? {
         if let match = clause.range(of: #""([^"]+)"|'([^']+)'"#, options: .regularExpression) {
             let quoted = String(clause[match])

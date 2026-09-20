@@ -76,4 +76,39 @@ final class ExecutionPolicyTests: XCTestCase {
             .run
         )
     }
+
+    func testGeneratedTextPreviewsBeforeTyping() {
+        let decision = Decision(
+            clause: "write a note apologising for the delay",
+            action: .dictate,
+            query: "a note apologising for the delay",
+            composes: true,
+            generatedText: "Sorry for the delay — thank you for your patience."
+        )
+        XCTAssertEqual(
+            ExecutionPolicy.verdict(
+                for: [decision],
+                alwaysConfirm: false,
+                previewGeneratedText: true
+            ),
+            .confirm(reason: "Type this? Sorry for the delay — thank you for your patience.")
+        )
+    }
+
+    func testGeneratedTextRunsWithoutPreview() {
+        let decision = Decision(
+            clause: "write a note apologising for the delay",
+            action: .dictate,
+            composes: true,
+            generatedText: "Sorry for the delay."
+        )
+        XCTAssertEqual(
+            ExecutionPolicy.verdict(
+                for: [decision],
+                alwaysConfirm: false,
+                previewGeneratedText: false
+            ),
+            .run
+        )
+    }
 }

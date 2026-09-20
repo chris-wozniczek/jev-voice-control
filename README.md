@@ -55,6 +55,14 @@ for clicks and text entry. Enable remote debugging with
 `open -a "Google Chrome" --args --remote-debugging-port=9222`, then enable the
 Chrome DevTools option in Computer use settings.
 
+### Written replies
+
+Requests such as “write a note apologising for the delay” are composed by a
+generative text model rather than typing the spoken words verbatim. DeepSeek
+is used by default, or a local oMLX OpenAI-compatible endpoint can be selected
+in Computer use settings. Jev classifies the request; it does not generate
+the prose. Generated text is previewed before typing by default.
+
 ```
 microphone ──> SFSpeechRecognizer (on-device) ──> transcript
                                                       │
@@ -71,7 +79,7 @@ microphone ──> SFSpeechRecognizer (on-device) ──> transcript
 ```
 
 Jev never produces free text — each clause is one `systemOne` call with a state
-payload (`clause`, `full_transcript`, `frontmost_app`, `installed_apps`) and five
+payload (`clause`, `full_transcript`, `frontmost_app`, `installed_apps`) and six
 questions:
 
 | question | type | shape |
@@ -81,6 +89,7 @@ questions:
 | `system_action` | choice | `volumeSet`, `mute`, `lockScreen`, `screenshot`, … |
 | `mentions_url` | noul | probability the clause names a website |
 | `refers_to_frontmost` | noul | "quit it" → the frontmost app |
+| `composes` | noul | probability the clause asks Jev to write the wording |
 | `destructive` | noul | probability the clause is hard to undo |
 
 Arguments (URLs, queries, dictation text, percentages) can't come from Jev —

@@ -137,6 +137,30 @@ final class JevStepPlannerTests: XCTestCase {
     }
 
     @MainActor
+    func testGeneratedTextIsTypedVerbatim() async throws {
+        let fake = FakeJev(
+            answer: .choice(choice: "e1", confidence: 0.9, probabilities: ["e1": 0.9]),
+            goalReached: 0.1
+        )
+        let planner = JevStepPlanner(client: fake, canEscalate: false)
+        let turn = try await planner.next(PlannerContext(
+            goal: "reply saying I'll be late",
+            generatedText: "I’m sorry, I’ll be late today.",
+            snapshot: snapshot([
+                CuaElement(token: "tok-input", role: "AXTextField", label: "Message", value: nil),
+            ])
+        ))
+        XCTAssertEqual(turn.toolCalls.first?.name, "type_text")
+        XCTAssertEqual(
+            turn.toolCalls.first?.arguments["text"]?.stringValue,
+            "I’m sorry, I’ll be late today."
+        )
+        let state = try XCTUnwrap(fake.states.first?.objectValue)
+        XCTAssertEqual(state["text_to_type"]?.stringValue, "I’m sorry, I’ll be late today.")
+        XCTAssertEqual(state["text_is_generated"]?.boolValue, true)
+    }
+
+    @MainActor
     func testGoalReachedAfterMutationReturnsDoneDespiteLowActionConfidence() async throws {
         let fake = FakeJev(answer: .choice(choice: "stuck", confidence: 0.1, probabilities: ["stuck": 0.9]), goalReached: 0.9)
         let planner = JevStepPlanner(client: fake, canEscalate: false)

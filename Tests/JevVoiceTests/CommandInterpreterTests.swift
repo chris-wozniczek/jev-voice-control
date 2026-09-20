@@ -79,4 +79,25 @@ final class CommandInterpreterTests: XCTestCase {
 
         XCTAssertEqual(CommandInterpreter.propagateContext(decisions)[1].targetApp, "Devin")
     }
+
+    func testComposesFlagFromCannedJevResponse() {
+        XCTAssertTrue(
+            CommandInterpreter.composes(
+                from: .noul(0.9),
+                action: .dictate
+            )
+        )
+        XCTAssertFalse(
+            CommandInterpreter.composes(
+                from: .noul(0.9),
+                action: .openApp
+            )
+        )
+        XCTAssertFalse(
+            CommandInterpreter.composes(
+                from: .noul(0.4),
+                action: .uiTask
+            )
+        )
+    }
 }
