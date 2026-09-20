@@ -7,6 +7,7 @@ CUA_DRIVER_URL = https://github.com/trycua/cua/releases/download/cua-driver-rs-v
 CUA_DRIVER_SHA256 = e273181b26709c88b1d809474deb3c592b4efae3530b11d76318f1887fc3fbb1
 CUA_DRIVER_ARCHIVE = build/cua/cua-driver.tar.gz
 CUA_DRIVER_BINARY = build/cua/cua-driver
+RESOURCE_BUNDLE = .build/release/JevVoice_JevVoice.bundle
 
 .PHONY: build fetch-cua app run test dist clean icon
 
@@ -28,6 +29,7 @@ app: build fetch-cua
 	cp Info.plist "$(APP)/Contents/Info.plist"
 	mkdir -p "$(APP)/Contents/Resources"
 	cp Resources/AppIcon.icns "$(APP)/Contents/Resources/AppIcon.icns"
+	cp -R "$(RESOURCE_BUNDLE)" "$(APP)/Contents/Resources/"
 	mkdir -p "$(APP)/Contents/Helpers"
 	cp "$(CUA_DRIVER_BINARY)" "$(APP)/Contents/Helpers/cua-driver"
 	chmod +x "$(APP)/Contents/Helpers/cua-driver"
