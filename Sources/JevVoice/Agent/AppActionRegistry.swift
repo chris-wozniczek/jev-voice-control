@@ -118,13 +118,35 @@ final class AppActionRegistry {
     }
 
     private static func loadBundledActions() -> [AppAction] {
-        guard let url = Bundle.module.url(
-            forResource: "app-actions",
-            withExtension: "json"
-        ) else {
+        guard let url = bundledResourceURL() else {
+            Log.agent.error("could not locate bundled app-actions.json")
             return []
         }
         return decode(url: url)
+    }
+
+    private static func bundledResourceURL() -> URL? {
+        let bundleName = "JevVoice_JevVoice.bundle"
+        let bundleForType = Bundle(for: AppActionRegistry.self)
+        let roots = [
+            Bundle.main.resourceURL,
+            bundleForType.resourceURL,
+            Bundle.main.bundleURL.deletingLastPathComponent(),
+            bundleForType.bundleURL.deletingLastPathComponent(),
+        ].compactMap { $0 }
+        for root in roots {
+            let url = root
+                .appendingPathComponent(bundleName)
+                .appendingPathComponent("app-actions.json")
+            if FileManager.default.fileExists(atPath: url.path) {
+                return url
+            }
+        }
+        #if DEBUG
+        return Bundle.module.url(forResource: "app-actions", withExtension: "json")
+        #else
+        return nil
+        #endif
     }
 
     private static func loadUserActions() -> [AppAction] {
