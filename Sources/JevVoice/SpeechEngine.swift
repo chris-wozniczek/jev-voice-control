@@ -32,6 +32,14 @@ private final class WhisperStoreReference: @unchecked Sendable {
     }
 }
 
+private final class WhisperKitReference: @unchecked Sendable {
+    let value: WhisperKit
+
+    init(_ value: WhisperKit) {
+        self.value = value
+    }
+}
+
 @MainActor
 final class WhisperModelStore: ObservableObject {
     static let shared = WhisperModelStore()
@@ -58,6 +66,8 @@ final class WhisperModelStore: ObservableObject {
     private var downloadTask: Task<Void, Never>?
     private var loadedKit: WhisperKit?
     private var loadedPath: String?
+    private var preloadTask: Task<WhisperKitReference, Error>?
+    private var preloadPath: String?
 
     private init() {
         let defaults = UserDefaults.standard
@@ -96,6 +106,7 @@ final class WhisperModelStore: ObservableObject {
         selectedModel = Self.models.contains(where: { $0.id == model }) ? model : Self.models[1].id
         UserDefaults.standard.set(selectedModel, forKey: "whisperModel")
         updateState()
+        preload()
     }
 
     func downloadSelected() {
@@ -126,6 +137,7 @@ final class WhisperModelStore: ObservableObject {
                 modelStore.downloadTask = nil
                 modelStore.state = .ready
                 Log.speech.info("Whisper model ready name=\(model.id, privacy: .public)")
+                modelStore.preload()
             } catch {
                 modelStore?.downloadTask = nil
                 modelStore?.state = .failed(error.localizedDescription)
@@ -140,14 +152,68 @@ final class WhisperModelStore: ObservableObject {
         state = isReady ? .ready : .notDownloaded
     }
 
+    func preload() {
+        guard Config.shared.speechEngine == .whisper,
+              isReady,
+              let path = selectedPath,
+              loadedPath != path else {
+            return
+        }
+        if preloadPath == path, preloadTask != nil {
+            return
+        }
+        preloadTask?.cancel()
+        preloadPath = path
+        let modelName = selected.id
+        let started = Date()
+        Log.speech.info("Whisper preload start name=\(modelName, privacy: .public)")
+        let task = Task<WhisperKitReference, Error> { [weak self] in
+            guard let self else {
+                throw SpeechEngineError.message("Whisper model store unavailable")
+            }
+            return WhisperKitReference(try await self.loadKitUncached(at: path))
+        }
+        preloadTask = task
+        Task { [weak self] in
+            do {
+                let kit = try await task.value.value
+                guard let self, self.preloadPath == path else { return }
+                self.loadedKit = kit
+                self.loadedPath = path
+                let elapsed = Date().timeIntervalSince(started)
+                Log.speech.info(
+                    "Whisper preload ready name=\(modelName, privacy: .public) elapsed=\(elapsed, privacy: .public)"
+                )
+            } catch {
+                guard let self, self.preloadPath == path else { return }
+                Log.speech.info(
+                    "Whisper preload failure error=\(error.localizedDescription, privacy: .public)"
+                )
+            }
+            guard let self, self.preloadPath == path else { return }
+            self.preloadTask = nil
+            self.preloadPath = nil
+        }
+    }
+
     func loadKit(at path: String) async throws -> WhisperKit {
         if let loadedKit, loadedPath == path {
             return loadedKit
         }
-        let kit = try await WhisperKit(modelFolder: path, load: true, download: false)
+        if let preloadTask, preloadPath == path {
+            let kit = try await preloadTask.value.value
+            loadedKit = kit
+            loadedPath = path
+            return kit
+        }
+        let kit = try await loadKitUncached(at: path)
         loadedKit = kit
         loadedPath = path
         return kit
+    }
+
+    private func loadKitUncached(at path: String) async throws -> WhisperKit {
+        try await WhisperKit(modelFolder: path, load: true, download: false)
     }
 }
 

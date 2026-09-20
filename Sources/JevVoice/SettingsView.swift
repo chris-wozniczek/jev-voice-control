@@ -303,6 +303,11 @@ struct SettingsView: View {
                     Text("Apple Speech").tag(SpeechEngineKind.apple)
                     Text("Whisper on-device").tag(SpeechEngineKind.whisper)
                 }
+                .onChange(of: config.speechEngine) { _, engine in
+                    if engine == .whisper {
+                        whisperStore.preload()
+                    }
+                }
                 Picker("Whisper model", selection: $config.whisperModel) {
                     ForEach(WhisperModelStore.models) { model in
                         Text(model.name).tag(model.id)
