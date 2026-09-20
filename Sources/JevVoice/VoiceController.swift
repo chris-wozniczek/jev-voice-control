@@ -222,7 +222,14 @@ final class VoiceController: ObservableObject {
             )
         }
 
-        let verdict = ExecutionPolicy.verdict(for: decisions, alwaysConfirm: config.alwaysConfirm)
+        if !(await generateComposedText()) {
+            return
+        }
+        let verdict = ExecutionPolicy.verdict(
+            for: decisions,
+            alwaysConfirm: config.alwaysConfirm,
+            previewGeneratedText: config.previewGeneratedText
+        )
         Log.command.info("verdict=\(String(describing: verdict), privacy: .public)")
         let routesToAgent = shouldUseComputerAgent(
             transcript: text, decisions: decisions, verdict: verdict, error: interpretationError
@@ -257,6 +264,70 @@ final class VoiceController: ObservableObject {
             await speakIfEnabled(reason)
             onDone?()
         }
+    }
+
+    func makeGenerator() -> ContentGenerating? {
+        switch config.generatorSource {
+        case .deepSeek:
+            guard !config.deepSeekAPIKey.isEmpty,
+                  let endpoint = URL(string: "https://api.deepseek.com/chat/completions") else {
+                return nil
+            }
+            return OpenAICompatibleGenerator(
+                endpoint: endpoint,
+                apiKey: config.deepSeekAPIKey,
+                model: "deepseek-flash",
+                thinking: .off
+            )
+        case .omlx:
+            guard !config.omlxTextModel.isEmpty else { return nil }
+            let base = config.omlxBaseURL.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+            guard let endpoint = URL(string: "\(base)/v1/chat/completions") else { return nil }
+            return OpenAICompatibleGenerator(
+                endpoint: endpoint,
+                apiKey: nil,
+                model: config.omlxTextModel,
+                thinking: nil
+            )
+        }
+    }
+
+    private func generateComposedText() async -> Bool {
+        let indices = decisions.indices.filter {
+            decisions[$0].composes && decisions[$0].generatedText == nil
+        }
+        guard !indices.isEmpty else { return true }
+        guard let generator = makeGenerator() else {
+            let reason = "Add a DeepSeek key (or set up oMLX) in Settings so Jev can write text for you"
+            status = .error(reason)
+            await speakIfEnabled(reason)
+            onDone?()
+            return false
+        }
+        status = .thinking
+        for index in indices {
+            let decision = decisions[index]
+            do {
+                let generated = try await generator.compose(
+                    brief: decision.query ?? decision.clause,
+                    context: ComposeContext(
+                        app: decision.targetApp ?? lastExternalFrontmostApp,
+                        windowTitle: AgentRunner.shared.currentWindowTitle
+                    )
+                )
+                decisions[index].generatedText = generated
+                if decisions[index].action == .dictate {
+                    decisions[index].text = generated
+                }
+            } catch {
+                let reason = error.localizedDescription
+                status = .error(reason)
+                await speakIfEnabled(reason)
+                onDone?()
+                return false
+            }
+        }
+        return true
     }
 
     @MainActor
@@ -398,7 +469,10 @@ final class VoiceController: ObservableObject {
                     let target = decision.targetApp ?? lastExternalFrontmostApp
                     let outcome = await AgentRunner.shared.run(
                         goal: decision.clause,
-                        context: AgentContext(frontmostApp: target)
+                        context: AgentContext(
+                            frontmostApp: target,
+                            generatedText: decision.generatedText
+                        )
                     )
                     switch outcome {
                     case .done(let summary):
@@ -428,7 +502,13 @@ final class VoiceController: ObservableObject {
                     try await Task.sleep(nanoseconds: 700_000_000)
                 }
                 let result = try await Executor.execute(decision)
-                results.append(result)
+                if decision.action == .dictate, decision.composes, decision.generatedText != nil {
+                    let words = decision.generatedText?
+                        .split(whereSeparator: { $0.isWhitespace || $0.isNewline }).count ?? 0
+                    results.append("Typed a \(words)-word message")
+                } else {
+                    results.append(result)
+                }
                 Log.command.info(
                     "executor result action=\(decision.action.rawValue, privacy: .public) result=\(result, privacy: .public)"
                 )

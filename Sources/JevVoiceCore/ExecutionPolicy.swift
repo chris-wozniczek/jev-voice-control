@@ -7,9 +7,19 @@ public enum ExecutionPolicy {
         case reject(reason: String)
     }
 
-    public static func verdict(for decisions: [Decision], alwaysConfirm: Bool) -> Verdict {
+    public static func verdict(
+        for decisions: [Decision],
+        alwaysConfirm: Bool,
+        previewGeneratedText: Bool = false
+    ) -> Verdict {
         if decisions.contains(where: { $0.riskTier == .destructive }) {
             return .confirm(reason: "This sounds hard to undo — confirm?")
+        }
+        if previewGeneratedText,
+           let generated = decisions.first(where: { $0.composes && $0.generatedText != nil })?.generatedText {
+            let preview = String(generated.prefix(120))
+            let suffix = generated.count > 120 ? "…" : ""
+            return .confirm(reason: "Type this? \(preview)\(suffix)")
         }
         if alwaysConfirm {
             return .confirm(reason: "Ask before running is on")
@@ -31,7 +41,7 @@ public enum ExecutionPolicy {
             }
         }
         if decisions.contains(where: {
-            $0.action != .none && $0.action != .uiTask && $0.confidence < 0.4
+            !$0.composes && $0.action != .none && $0.action != .uiTask && $0.confidence < 0.4
         }) {
             return .confirm(reason: "Low confidence")
         }

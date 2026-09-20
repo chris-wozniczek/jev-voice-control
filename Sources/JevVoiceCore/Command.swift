@@ -71,6 +71,9 @@ public struct Decision {
     public var text: String?
     public var percent: Int?
     public var destructive: Bool
+    /// The request asks Jev to compose wording before typing it; `query` contains the brief.
+    public var composes: Bool
+    public var generatedText: String?
     public var confidence: Double
     public var latencyMs: Double
     public var model: String
@@ -88,6 +91,8 @@ public struct Decision {
         text: String? = nil,
         percent: Int? = nil,
         destructive: Bool = false,
+        composes: Bool = false,
+        generatedText: String? = nil,
         confidence: Double = 0,
         latencyMs: Double = 0,
         model: String = ""
@@ -104,6 +109,8 @@ public struct Decision {
         self.text = text
         self.percent = percent
         self.destructive = destructive
+        self.composes = composes
+        self.generatedText = generatedText
         self.confidence = confidence
         self.latencyMs = latencyMs
         self.model = model
@@ -137,6 +144,9 @@ public struct Decision {
         case .openURL: return "Open \(url ?? "website")"
         case .webSearch: return "Search for \(query ?? "query")"
         case .dictate:
+            if composes {
+                return "Write \(query ?? "a message") and type it"
+            }
             let value = text ?? "text"
             return "Type “\(value)”"
         case .uiTask:

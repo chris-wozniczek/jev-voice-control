@@ -78,7 +78,7 @@ final class JevStepPlanner: ActionPlanner {
             )
         }
 
-        let textToType = SlotExtractor.typedText(from: ctx.goal)
+        let textToType = ctx.generatedText ?? SlotExtractor.typedText(from: ctx.goal)
         let clickedLabels: Set<String> = Set(ctx.history.compactMap { record -> String? in
             guard record.succeeded,
                   ["click", "click_at"].contains(record.tool),
@@ -102,6 +102,7 @@ final class JevStepPlanner: ActionPlanner {
             "previous_actions": .array(previousActions.map(JSONValue.string)),
             "worked_before": .array(workedBeforeDescriptions.map(JSONValue.string)),
             "text_to_type": textToType.map(JSONValue.string) ?? .null,
+            "text_is_generated": .bool(ctx.generatedText != nil),
             "elements": .array(candidates.map { candidate in
                 .object([
                     "id": .string(candidate.id),

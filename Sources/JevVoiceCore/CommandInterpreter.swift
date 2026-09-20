@@ -190,6 +190,14 @@ public final class CommandInterpreter {
         ]
     }
 
+    static func composes(from answer: Answer, action: Action) -> Bool {
+        guard [.dictate, .uiTask].contains(action),
+              case .noul(let probability) = answer else {
+            return false
+        }
+        return probability > 0.6
+    }
+
     private func interpretClause(
         _ clause: String, transcript: String, frontmostApp: String?
     ) async throws -> Decision {
@@ -220,6 +228,9 @@ public final class CommandInterpreter {
             ),
             "refers_to_frontmost": .noul(
                 instructions: "Does the clause \"\(clause)\" refer to the currently active app rather than naming one?"
+            ),
+            "composes": .noul(
+                instructions: "Does the clause \"\(clause)\" ask Jev to write or compose the wording itself (e.g. an apology, a reply, a summary, a message about something) rather than typing the exact words spoken?"
             ),
             "destructive": .noul(
                 instructions: "Does the clause \"\(clause)\" ask to delete, remove, send, submit, pay, buy, sign out, shut down, or otherwise do something that is hard to undo?"
@@ -275,7 +286,7 @@ public final class CommandInterpreter {
 
         let url = SlotExtractor.url(from: clause)
         var query = SlotExtractor.searchQuery(from: clause)
-        let text = SlotExtractor.dictationText(from: clause)
+        var text = SlotExtractor.dictationText(from: clause)
         let percent = SlotExtractor.numberPercent(from: clause)
 
         if action == .openURL && url == nil, let q = query {
@@ -323,6 +334,13 @@ public final class CommandInterpreter {
             action = .system
         }
 
+        let composes = response.answers["composes"]
+            .map { Self.composes(from: $0, action: action) } ?? false
+        if composes, let brief = SlotExtractor.composeRequest(from: clause) {
+            query = brief
+            text = nil
+        }
+
         let destructive: Bool
         if case .noul(let probability) = response.answers["destructive"] {
             destructive = probability > 0.6
@@ -346,6 +364,7 @@ public final class CommandInterpreter {
             text: text,
             percent: percent,
             destructive: destructive,
+            composes: composes,
             confidence: confidence,
             latencyMs: latencyMs,
             model: response.model

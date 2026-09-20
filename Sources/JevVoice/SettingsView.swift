@@ -77,6 +77,22 @@ struct SettingsView: View {
                                 Text("Low").tag(DeepSeekThinking.low)
                                 Text("High").tag(DeepSeekThinking.high)
                             }
+                            Text("Written replies")
+                                .font(.callout.weight(.semibold))
+                                .padding(.top, 4)
+                            Picker("Writer", selection: $config.generatorSource) {
+                                Text("DeepSeek").tag(GeneratorSource.deepSeek)
+                                Text("local oMLX").tag(GeneratorSource.omlx)
+                            }
+                            if config.generatorSource == .omlx {
+                                TextField("oMLX base URL", text: $config.omlxBaseURL)
+                                    .textFieldStyle(.roundedBorder)
+                                TextField("oMLX text model", text: $config.omlxTextModel)
+                                    .textFieldStyle(.roundedBorder)
+                            }
+                            Toggle("Show generated text before typing it", isOn: $config.previewGeneratedText)
+                                .toggleStyle(.switch)
+                                .controlSize(.small)
                             Toggle("Let Jev operate apps (Cua)", isOn: $config.computerUseEnabled)
                                 .toggleStyle(.switch)
                                 .controlSize(.small)

@@ -46,6 +46,7 @@ final class AgentRunner: ObservableObject {
     private var cancellationRequested = false
 
     var hintStore: HintStore = .shared
+    var currentWindowTitle: String? { lastWindowTitle }
 
     private init() {}
 
@@ -138,6 +139,7 @@ final class AgentRunner: ObservableObject {
             goal: goal,
             targetApp: targetApp,
             windowTitle: nil,
+            generatedText: context.generatedText,
             snapshot: nil,
             history: [],
             stepIndex: 0
@@ -594,8 +596,11 @@ final class AgentRunner: ObservableObject {
 
 struct AgentContext {
     var frontmostApp: String?
-    init(frontmostApp: String? = nil) {
+    var generatedText: String?
+
+    init(frontmostApp: String? = nil, generatedText: String? = nil) {
         self.frontmostApp = frontmostApp
+        self.generatedText = generatedText
     }
 }
 
