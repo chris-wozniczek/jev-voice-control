@@ -41,6 +41,7 @@ final class AgentRunner: ObservableObject {
     private var lastWindowFrame: CGRect?
     private var lastSnapshot: CuaSnapshot?
     private var lastAXEntries: [String: AXEntry] = [:]
+    private var lastOCRPoints: [String: CGPoint] = [:]
     private var lastWindowTitle: String?
     private var lastCDPTitle: String?
     private var lastCDPPort: Int?
@@ -330,6 +331,10 @@ final class AgentRunner: ObservableObject {
         lastAXEntries = entries
     }
 
+    func setOCRPointsForTesting(_ points: [String: CGPoint]) {
+        lastOCRPoints = points
+    }
+
     func executeForTesting(_ call: DeepSeekToolCall) async throws -> ToolOutput {
         try await execute(call)
     }
@@ -455,6 +460,16 @@ final class AgentRunner: ObservableObject {
                 }
                 return try await afterMutation("Clicked \(entry.label)")
             }
+            if token.hasPrefix("ocr:") {
+                guard let point = lastOCRPoints[token],
+                      let pid = lastPID else {
+                    throw AgentError.api("Observe the window again — that element is stale")
+                }
+                NSRunningApplication(processIdentifier: pid_t(pid))?.activate()
+                try await Task.sleep(for: .milliseconds(100))
+                CGEventClicker.click(at: point)
+                return try await afterMutation("Clicked \(lastSnapshot?.element(token: token)?.label ?? "text")")
+            }
             guard let pid = lastPID else { throw AgentError.api("Observe a window first") }
             do {
                 let result = try await measureCua {
@@ -506,6 +521,24 @@ final class AgentRunner: ObservableObject {
                 return try await afterMutation("Typed text")
             }
             guard let pid = lastPID else { throw AgentError.api("Observe a window before typing") }
+            if let token, token.hasPrefix("ocr:") {
+                guard let point = lastOCRPoints[token] else {
+                    throw AgentError.api("Observe the window again — that element is stale")
+                }
+                NSRunningApplication(processIdentifier: pid_t(pid))?.activate()
+                try await Task.sleep(for: .milliseconds(100))
+                CGEventClicker.click(at: point)
+                try await Task.sleep(for: .milliseconds(100))
+                let result = try await measureCua {
+                    try await CuaDriver.shared.type(
+                        pid: pid,
+                        text: text,
+                        token: nil,
+                        windowId: lastWindowID
+                    )
+                }
+                return try await afterMutation(result.text ?? "Typed text")
+            }
             if let token, token.hasPrefix("ax:") {
                 guard let entry = lastAXEntries[token] else {
                     throw AgentError.api("Observe the window again — that element is stale")
@@ -786,6 +819,7 @@ final class AgentRunner: ObservableObject {
         lastCDPTitle = nil
         lastCDPPort = nil
         var mergedSnapshot = resolvedSnapshot
+        var ocrPoints: [String: CGPoint] = [:]
         let interactiveRoles: Set<String> = [
             "AXButton", "AXLink", "AXTextField", "AXTextArea", "AXMenuItem",
             "AXTab", "AXCheckBox", "AXRadioButton", "AXPopUpButton", "AXComboBox",
@@ -826,6 +860,35 @@ final class AgentRunner: ObservableObject {
                 )
             }
         }
+        let interactiveCount = mergedSnapshot.elements.filter {
+            AXTreeReader.interactiveRoles.contains($0.role)
+        }.count
+        if Config.shared.ocrFallbackEnabled,
+           interactiveCount < 3,
+           Permission.screenRecording.isGranted,
+           let frame = lastWindowFrame ?? Self.cgRect(window.frame) {
+            let ocrStarted = Date()
+            let hits = await Task.detached(priority: .userInitiated) {
+                OCRReader.scan(windowFrame: frame)
+            }.value ?? []
+            Log.agent.info(
+                "stage=ocr labels=\(hits.count) elapsed=\(Date().timeIntervalSince(ocrStarted))"
+            )
+            if !hits.isEmpty {
+                let lines = hits.map { hit in
+                    "[\(hit.element.token)] \(hit.element.role) \(hit.element.label)"
+                }.joined(separator: "\n")
+                mergedSnapshot = CuaSnapshot(
+                    snapshotId: mergedSnapshot.snapshotId,
+                    treeMarkdown: mergedSnapshot.treeMarkdown + "\n" + lines,
+                    elements: mergedSnapshot.elements + hits.map(\.element),
+                    image: mergedSnapshot.image
+                )
+                ocrPoints = Dictionary(uniqueKeysWithValues: hits.map {
+                    ($0.element.token, $0.point)
+                })
+            }
+        }
         lastApp = app
         lastPID = app.pid
         lastWindowID = window.id
@@ -833,7 +896,7 @@ final class AgentRunner: ObservableObject {
             lastWindowFrame = frame
         }
         lastWindowTitle = window.title
-        storeSnapshot(mergedSnapshot, axEntries: resolvedAXEntries)
+        storeSnapshot(mergedSnapshot, axEntries: resolvedAXEntries, ocrPoints: ocrPoints)
         let extra = includeImage && !Permission.screenRecording.isGranted
             ? " Screenshot unavailable: allow Screen Recording and proceed with AX only."
             : ""
@@ -872,10 +935,12 @@ final class AgentRunner: ObservableObject {
 
     private func storeSnapshot(
         _ snapshot: CuaSnapshot?,
-        axEntries: [String: AXEntry] = [:]
+        axEntries: [String: AXEntry] = [:],
+        ocrPoints: [String: CGPoint] = [:]
     ) {
         lastSnapshot = snapshot
         lastAXEntries = snapshot == nil ? [:] : axEntries
+        lastOCRPoints = snapshot == nil ? [:] : ocrPoints
     }
 
     private static func cgRect(_ frame: [String: Double]?) -> CGRect? {

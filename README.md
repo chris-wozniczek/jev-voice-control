@@ -174,6 +174,11 @@ Native Accessibility can read the target window's tree in-process for lower
 latency and uses Cua when the tree is too thin. Disable it in Computer use
 settings to use the Cua observer exclusively.
 
+When an app exposes almost no accessible controls, the optional OCR fallback
+uses Apple Vision locally to read visible labels and click their screen
+coordinates. It requires Screen Recording permission and can be disabled in
+Settings › Computer use.
+
 ## Debugging
 
 Inspect recent Jev Voice logs with:
