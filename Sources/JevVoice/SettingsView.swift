@@ -106,6 +106,12 @@ struct SettingsView: View {
                             Text("Reads the window's Accessibility tree directly; Cua is used when it's too thin.")
                                 .font(.caption2)
                                 .foregroundStyle(.secondary)
+                            Toggle("Read labels from the screen (OCR)", isOn: $config.ocrFallbackEnabled)
+                                .toggleStyle(.switch)
+                                .controlSize(.small)
+                            Text("When an app exposes almost no controls, Jev reads visible text with Apple Vision and clicks it. Needs Screen Recording.")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
                             HStack {
                                 Text("\(appActionCount) actions loaded")
                                     .font(.caption2)
