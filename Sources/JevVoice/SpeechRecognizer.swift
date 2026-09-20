@@ -16,6 +16,7 @@ final class SpeechRecognizer: ObservableObject {
 
     private var engine: SpeechEngine?
     private var silenceTimer: Timer?
+    private var silenceGate = SilenceGate()
 
     static func requestAuthorization() async -> Bool {
         let speechStatus = await withCheckedContinuation { continuation in
@@ -30,6 +31,7 @@ final class SpeechRecognizer: ObservableObject {
     func start() throws {
         cancel()
         transcript = ""
+        silenceGate.reset()
         let engine: SpeechEngine = Config.shared.speechEngine == .whisper
             ? WhisperSpeechEngine()
             : AppleSpeechEngine()
@@ -43,20 +45,25 @@ final class SpeechRecognizer: ObservableObject {
         engine.onError = { [weak self] error in
             self?.receiveError(error)
         }
+        engine.onListening = { [weak self] in
+            self?.engineStartedListening()
+        }
         engine.onStatus = { [weak self] message in
             self?.statusMessage = message
         }
         Log.speech.info(
             "engine start name=\(String(describing: type(of: engine)), privacy: .public) mode=\(Config.shared.listeningMode.rawValue, privacy: .public)"
         )
+        self.engine = engine
+        isRunning = true
         do {
             try engine.start()
         } catch {
             Log.speech.info("engine start error=\(error.localizedDescription, privacy: .public)")
+            self.engine = nil
+            isRunning = false
             throw error
         }
-        self.engine = engine
-        isRunning = true
     }
 
     func stop() {
@@ -69,6 +76,7 @@ final class SpeechRecognizer: ObservableObject {
     func cancel() {
         silenceTimer?.invalidate()
         silenceTimer = nil
+        silenceGate.reset()
         engine?.cancel()
         engine = nil
         statusMessage = nil
@@ -79,7 +87,8 @@ final class SpeechRecognizer: ObservableObject {
         guard isRunning else { return }
         transcript = text
         if !text.isEmpty {
-            if Config.shared.listeningMode == .toggle {
+            if Config.shared.listeningMode == .toggle,
+               silenceGate.shouldReschedule(partial: text) {
                 scheduleSilenceFinalize()
             }
             if hasEndWord(text) {
@@ -92,6 +101,7 @@ final class SpeechRecognizer: ObservableObject {
         isRunning = false
         silenceTimer?.invalidate()
         silenceTimer = nil
+        silenceGate.reset()
         statusMessage = nil
         let cleaned = stripEndWord(text)
         Log.speech.info("final transcript=\(cleaned, privacy: .public)")
@@ -110,6 +120,7 @@ final class SpeechRecognizer: ObservableObject {
         isRunning = false
         silenceTimer?.invalidate()
         silenceTimer = nil
+        silenceGate.reset()
         statusMessage = nil
         engine = nil
         if wasRunning {
@@ -118,9 +129,18 @@ final class SpeechRecognizer: ObservableObject {
     }
 
     private func scheduleSilenceFinalize() {
+        scheduleSilenceFinalize(after: Config.shared.silenceTimeout)
+    }
+
+    private func engineStartedListening() {
+        guard isRunning, Config.shared.listeningMode == .toggle else { return }
+        scheduleSilenceFinalize(after: max(Config.shared.silenceTimeout, 4.0))
+    }
+
+    private func scheduleSilenceFinalize(after timeout: Double) {
         silenceTimer?.invalidate()
         silenceTimer = Timer.scheduledTimer(
-            withTimeInterval: Config.shared.silenceTimeout,
+            withTimeInterval: timeout,
             repeats: false
         ) { [weak self] _ in
             Task { @MainActor in

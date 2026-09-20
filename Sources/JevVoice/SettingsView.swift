@@ -303,6 +303,11 @@ struct SettingsView: View {
                     Text("Apple Speech").tag(SpeechEngineKind.apple)
                     Text("Whisper on-device").tag(SpeechEngineKind.whisper)
                 }
+                .onChange(of: config.speechEngine) { _, engine in
+                    if engine == .whisper {
+                        whisperStore.preload()
+                    }
+                }
                 Picker("Whisper model", selection: $config.whisperModel) {
                     ForEach(WhisperModelStore.models) { model in
                         Text(model.name).tag(model.id)
@@ -312,6 +317,15 @@ struct SettingsView: View {
                 .onChange(of: config.whisperModel) { _, model in
                     whisperStore.select(model)
                 }
+                TextField(
+                    "Language code (blank = auto)",
+                    text: Binding(
+                        get: { config.speechLanguage ?? "" },
+                        set: { config.speechLanguage = $0.isEmpty ? nil : $0 }
+                    )
+                )
+                .textFieldStyle(.roundedBorder)
+                .disabled(config.speechEngine != .whisper)
                 HStack {
                     switch whisperStore.state {
                     case .notDownloaded:

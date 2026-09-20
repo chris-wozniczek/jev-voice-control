@@ -131,6 +131,16 @@ final class Config: ObservableObject {
         didSet { UserDefaults.standard.set(speechEngine.rawValue, forKey: "speechEngine") }
     }
 
+    @Published var speechLanguage: String? {
+        didSet {
+            if let speechLanguage, !speechLanguage.isEmpty {
+                UserDefaults.standard.set(speechLanguage, forKey: "speechLanguage")
+            } else {
+                UserDefaults.standard.removeObject(forKey: "speechLanguage")
+            }
+        }
+    }
+
     @Published var customVocabulary: [String] {
         didSet { UserDefaults.standard.set(customVocabulary, forKey: "customVocabulary") }
     }
@@ -186,6 +196,7 @@ final class Config: ObservableObject {
         self.speechEngine = SpeechEngineKind(
             rawValue: defaults.string(forKey: "speechEngine") ?? ""
         ) ?? .apple
+        self.speechLanguage = defaults.string(forKey: "speechLanguage")
         self.customVocabulary = defaults.stringArray(forKey: "customVocabulary")
             ?? ["x.com", "Grok", "Devin", "cmux", "ChatGPT", "Claude", "Gemini", "GitHub"]
         self.whisperModel = defaults.string(forKey: "whisperModel") ?? "openai_whisper-small"

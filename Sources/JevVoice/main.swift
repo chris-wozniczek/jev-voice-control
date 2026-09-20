@@ -13,6 +13,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.setActivationPolicy(.accessory)
         installEditMenu()
         AppRegistry.shared.refresh()
+        WhisperModelStore.shared.preload()
 
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         if let button = statusItem.button {
