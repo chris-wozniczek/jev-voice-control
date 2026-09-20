@@ -348,6 +348,33 @@ final class AgentTests: XCTestCase {
     }
 
     @MainActor
+    func testAppsAreCachedUntilForcedRefresh() async throws {
+        var calls = 0
+        AgentRunner.shared.setAppsProviderForTesting {
+            calls += 1
+            return [CuaApp(pid: 10, name: "Test App", bundleId: "com.example.test")]
+        }
+        defer {
+            AgentRunner.shared.setAppsProviderForTesting(nil)
+        }
+
+        _ = try await AgentRunner.shared.apps()
+        _ = try await AgentRunner.shared.apps()
+        XCTAssertEqual(calls, 1)
+
+        _ = try await AgentRunner.shared.apps(forceRefresh: true)
+        XCTAssertEqual(calls, 2)
+    }
+
+    @MainActor
+    func testAXPressFailureRetriesAfterActivate() {
+        XCTAssertTrue(AgentRunner.shouldRetryAfterActivate(
+            AgentError.api("AX action failed: AXUIElementPerformAction(AXPress) returned -25206")
+        ))
+        XCTAssertFalse(AgentRunner.shouldRetryAfterActivate(AgentError.api("timeout")))
+    }
+
+    @MainActor
     func testBudgetExhaustion() async {
         let planner = NeverDonePlanner()
         let outcome = await AgentRunner.shared.run(

@@ -224,7 +224,7 @@ final class DeepSeekPlanner: ActionPlanner {
     }
 
     static let tools: [JSONValue] = [
-        function("observe", "Observe running apps and the target window.", [
+        function("observe", "Observe running apps and the target window. Set screenshot=true when you need a screenshot.", [
             "app": property(.string("string"), description: "Optional app name."),
             "screenshot": property(.string("boolean"), description: "Request a screenshot."),
         ]),
