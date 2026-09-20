@@ -13,6 +13,8 @@ extension VoiceController {
             verdict: verdict,
             hasKey: !config.deepSeekAPIKey.isEmpty,
             enabled: config.computerUseEnabled,
+            installedApps: AppRegistry.shared.names,
+            aliases: AppRegistry.shared.aliases,
             error: error
         )
     }
@@ -23,11 +25,27 @@ extension VoiceController {
         verdict: ExecutionPolicy.Verdict,
         hasKey: Bool,
         enabled: Bool,
+        installedApps: [String] = [],
+        aliases: [String: String] = [:],
         error: Error? = nil
     ) -> Bool {
         guard enabled, hasKey else { return false }
         if error != nil || decisions.isEmpty { return true }
         if case .reject = verdict { return true }
+        if decisions.contains(where: { decision in
+            guard decision.model == "local",
+                  [.openApp, .switchApp].contains(decision.action) else {
+                return false
+            }
+            guard let app = decision.targetApp else { return true }
+            return !AppMatcher.residualWords(
+                clause: decision.clause,
+                matchedApp: app,
+                aliases: aliases
+            ).isEmpty
+        }) {
+            return true
+        }
         let startsWithLocalVerb = startsWithLocalCommand(transcript)
         let dictateOnly = decisions.allSatisfy { $0.action == .dictate }
         let words = transcript.split(whereSeparator: { $0.isWhitespace }).count

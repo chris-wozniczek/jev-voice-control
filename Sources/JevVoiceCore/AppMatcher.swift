@@ -169,6 +169,51 @@ public enum AppMatcher {
         return allowed.contains(normalized)
     }
 
+    /// Words in `clause` that are neither command vocabulary nor part of the matched app's name/alias.
+    public static func residualWords(
+        clause: String,
+        matchedApp: String,
+        aliases: [String: String]
+    ) -> [String] {
+        let lowered = clause.lowercased()
+        let ignored = stopWords.union([
+            "desktop", "in", "on", "for", "with", "into", "now",
+        ])
+        let appTokens = tokens(matchedApp.lowercased())
+        let aliasTokenSets = aliases
+            .filter { $0.value.caseInsensitiveCompare(matchedApp) == .orderedSame }
+            .map { tokens($0.key.lowercased()) }
+        let verbRanges = verbs.compactMap {
+            lowered.range(of: $0.pattern, options: [.regularExpression, .caseInsensitive])
+        }
+        var residual: [String] = []
+        lowered.enumerateSubstrings(
+            in: lowered.startIndex..<lowered.endIndex,
+            options: [.byWords]
+        ) { substring, range, _, _ in
+            guard let substring else { return }
+            if verbRanges.contains(where: {
+                $0.lowerBound < range.upperBound && range.lowerBound < $0.upperBound
+            }) {
+                return
+            }
+            let token = substring.lowercased()
+            guard !ignored.contains(token),
+                  !appTokens.contains(token),
+                  !aliasTokenSets.contains(where: { $0.contains(token) }) else {
+                return
+            }
+            let resemblesAppToken = appTokens.contains { appToken in
+                (token.count >= 3 && appToken.hasPrefix(token))
+                    || (appToken.count >= 3 && token.hasPrefix(appToken))
+            }
+            if !resemblesAppToken {
+                residual.append(token)
+            }
+        }
+        return residual
+    }
+
     private static func containsSequence(_ haystack: [String], _ needle: [String]) -> Bool {
         guard needle.count <= haystack.count else { return false }
         return (0...(haystack.count - needle.count)).contains {

@@ -105,6 +105,157 @@ final class AgentTests: XCTestCase {
     }
 
     @MainActor
+    func testResidualOpenIntentRoutesOnlyWithKey() {
+        let decision = Decision(
+            clause: "open a new session in devin",
+            action: .openApp,
+            targetApp: "Devin",
+            model: "local"
+        )
+        XCTAssertTrue(VoiceController.shouldRoute(
+            transcript: "open a new session in devin",
+            decisions: [decision],
+            verdict: .run,
+            hasKey: true,
+            enabled: true,
+            installedApps: ["Devin", "Google Chrome"],
+            aliases: AppMatcher.builtInAliases
+        ))
+        XCTAssertFalse(VoiceController.shouldRoute(
+            transcript: "open a new session in devin",
+            decisions: [decision],
+            verdict: .run,
+            hasKey: false,
+            enabled: true,
+            installedApps: ["Devin", "Google Chrome"],
+            aliases: AppMatcher.builtInAliases
+        ))
+    }
+
+    @MainActor
+    func testKnownAppCommandsStayLocalDespiteCommandVocabulary() {
+        let apps = ["Devin", "Google Chrome"]
+        let aliases = AppMatcher.builtInAliases
+        let cases = [
+            "open devin",
+            "open devin desktop",
+            "switch to chrome",
+            "open chrome",
+            "maximize chrome window",
+        ]
+        for clause in cases {
+            let decision = LocalCommandParser.parse(
+                clause: clause,
+                installedApps: apps,
+                aliases: aliases,
+                frontmostApp: nil
+            )
+            XCTAssertNotNil(decision, clause)
+            XCTAssertFalse(VoiceController.shouldRoute(
+                transcript: clause,
+                decisions: decision.map { [$0] } ?? [],
+                verdict: .run,
+                hasKey: true,
+                enabled: true,
+                installedApps: apps,
+                aliases: aliases
+            ), clause)
+        }
+    }
+
+    @MainActor
+    func testUnknownOpenIntentRoutesWithKeyButKeepsSuggestionsWithoutKey() {
+        let decision = Decision(
+            clause: "open a new session",
+            action: .openApp,
+            model: "local"
+        )
+        XCTAssertTrue(VoiceController.shouldRoute(
+            transcript: "open a new session",
+            decisions: [decision],
+            verdict: .run,
+            hasKey: true,
+            enabled: true,
+            installedApps: ["Devin"],
+            aliases: AppMatcher.builtInAliases
+        ))
+        XCTAssertFalse(VoiceController.shouldRoute(
+            transcript: "open a new session",
+            decisions: [decision],
+            verdict: .run,
+            hasKey: false,
+            enabled: true,
+            installedApps: ["Devin"],
+            aliases: AppMatcher.builtInAliases
+        ))
+    }
+
+    @MainActor
+    func testLocalOpenAndSearchClausesDoNotRoute() {
+        let apps = ["Google Chrome", "Devin"]
+        let aliases = AppMatcher.builtInAliases
+        let decisions = [
+            LocalCommandParser.parse(
+                clause: "open chrome",
+                installedApps: apps,
+                aliases: aliases,
+                frontmostApp: nil
+            ),
+            LocalCommandParser.parse(
+                clause: "search for bananas",
+                installedApps: apps,
+                aliases: aliases,
+                frontmostApp: nil
+            ),
+        ].compactMap { $0 }
+        XCTAssertFalse(VoiceController.shouldRoute(
+            transcript: "open chrome and search for bananas",
+            decisions: decisions,
+            verdict: .run,
+            hasKey: true,
+            enabled: true,
+            installedApps: apps,
+            aliases: aliases
+        ))
+    }
+
+    @MainActor
+    func testAgentPicksRealWindowOverTinyHelper() {
+        let windows = [
+            CuaWindow(id: 1, title: "", frame: ["width": 1, "height": 1]),
+            CuaWindow(id: 2, title: "Main", frame: ["width": 800, "height": 600]),
+        ]
+        XCTAssertEqual(AgentRunner.pickWindow(windows, preferring: nil), windows[1])
+    }
+
+    @MainActor
+    func testAgentFallsBackToFirstUntitledWindow() {
+        let windows = [
+            CuaWindow(id: 1, title: "", frame: ["width": 800, "height": 600]),
+            CuaWindow(id: 2, title: "", frame: ["width": 900, "height": 700]),
+        ]
+        XCTAssertEqual(AgentRunner.pickWindow(windows, preferring: nil), windows[0])
+    }
+
+    @MainActor
+    func testAgentPreservesLastWindowOverDriverOrder() {
+        let windows = [
+            CuaWindow(id: 1, title: "First", frame: ["width": 800, "height": 600]),
+            CuaWindow(id: 2, title: "Previously selected", frame: ["width": 900, "height": 700]),
+        ]
+        XCTAssertEqual(AgentRunner.pickWindow(windows, preferring: 2), windows[1])
+    }
+
+    @MainActor
+    func testAgentUsesFirstQualifyingWindowOverLargerLaterWindow() {
+        let windows = [
+            CuaWindow(id: 1, title: "First", frame: ["width": 300, "height": 200]),
+            CuaWindow(id: 2, title: "Larger", frame: ["width": 900, "height": 700]),
+        ]
+        XCTAssertEqual(AgentRunner.pickWindow(windows, preferring: nil), windows[0])
+    }
+
+    @MainActor
     func testBudgetExhaustion() async {
         let planner = NeverDonePlanner()
         let outcome = await AgentRunner.shared.run(

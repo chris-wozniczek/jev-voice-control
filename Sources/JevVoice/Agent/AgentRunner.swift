@@ -38,6 +38,7 @@ final class AgentRunner: ObservableObject {
     private var lastPID: Int?
     private var lastWindowID: Int?
     private var lastSnapshot: CuaSnapshot?
+    private var targetApp: String?
     private var confirmationContinuation: CheckedContinuation<Bool, Never>?
     private var cancellationRequested = false
 
@@ -60,9 +61,15 @@ final class AgentRunner: ObservableObject {
         steps = []
         isRunning = true
         cancellationRequested = false
+        targetApp = context.frontmostApp
+        Log.agent.info(
+            "run start goal=\(goal, privacy: .public) targetApp=\((self.targetApp ?? "none"), privacy: .public)"
+        )
+        var outcomeDescription = "unknown"
         defer {
             isRunning = false
             pendingConfirmation = false
+            Log.agent.info("outcome=\(outcomeDescription, privacy: .public)")
         }
         lastPID = nil
         lastWindowID = nil
@@ -82,7 +89,7 @@ final class AgentRunner: ObservableObject {
                 role: "user",
                 content: .string(
                     "Current date/time: \(ISO8601DateFormatter().string(from: Date())). " +
-                    "Frontmost app: \(frontmost). Goal: \(goal)"
+                    "Target app: \(frontmost). Goal: \(goal)"
                 ),
                 name: nil,
                 toolCallID: nil,
@@ -112,18 +119,26 @@ final class AgentRunner: ObservableObject {
                     elapsed: 0
                 )
                 steps.append(step)
+                Log.agent.info(
+                    "tool call index=\(callCount) tool=\(call.name, privacy: .public) args=\(self.summarize(call.arguments), privacy: .public)"
+                )
                 do {
                     let output = try await execute(call)
                     step.result = .ok(output.text)
                     step.elapsed = Date().timeIntervalSince(started)
                     steps[steps.count - 1] = step
+                    Log.agent.info(
+                        "tool result success=true first=\(String(output.text.prefix(200)), privacy: .public) elapsed=\(step.elapsed)"
+                    )
                     plannerContext.messages.append(toolMessage(
                         id: call.id, content: output.content, image: output.image
                     ))
                     if call.name == "done" {
+                        outcomeDescription = "done"
                         return .done(output.text)
                     }
                     if call.name == "fail" {
+                        outcomeDescription = "failed"
                         return .failed(output.text)
                     }
                 } catch is CancellationError {
@@ -132,6 +147,9 @@ final class AgentRunner: ObservableObject {
                     step.result = .failed(error.localizedDescription)
                     step.elapsed = Date().timeIntervalSince(started)
                     steps[steps.count - 1] = step
+                    Log.agent.info(
+                        "tool result success=false first=\(String(error.localizedDescription.prefix(200)), privacy: .public) elapsed=\(step.elapsed)"
+                    )
                     plannerContext.messages.append(toolMessage(
                         id: call.id, content: error.localizedDescription, image: nil
                     ))
@@ -139,10 +157,13 @@ final class AgentRunner: ObservableObject {
             }
             throw AgentError.budget
         } catch is CancellationError {
+            outcomeDescription = "cancelled"
             return .cancelled
         } catch AgentError.cancelled {
+            outcomeDescription = "cancelled"
             return .cancelled
         } catch {
+            outcomeDescription = "failed"
             return .failed(error.localizedDescription)
         }
     }
@@ -158,6 +179,11 @@ final class AgentRunner: ObservableObject {
         pendingConfirmation = false
         CuaDriver.shared.shutdown()
         isRunning = false
+    }
+
+    func clearSteps() {
+        guard !isRunning else { return }
+        steps = []
     }
 
     func resolveConfirmation(_ transcript: String) -> Bool {
@@ -196,6 +222,7 @@ final class AgentRunner: ObservableObject {
             }
             let decision = Decision(clause: "open \(name)", action: .openApp, targetApp: name)
             let text = try await Executor.execute(decision)
+            targetApp = name
             return try await afterMutation(text)
         case "click":
             guard let token = call.arguments["element_token"]?.stringValue else {
@@ -245,32 +272,52 @@ final class AgentRunner: ObservableObject {
 
     private func observe(_ arguments: [String: JSONValue]) async throws -> ToolOutput {
         let apps = try await CuaDriver.shared.apps()
-        let requested = arguments["app"]?.stringValue
-        let frontmost = NSWorkspace.shared.frontmostApplication?.localizedName
-        let app = apps.first {
-            guard let requested else { return $0.name.caseInsensitiveCompare(frontmost ?? "") == .orderedSame }
-            return $0.name.localizedCaseInsensitiveContains(requested)
+        let reportedApps = apps.filter { app in
+            app.bundleId != Bundle.main.bundleIdentifier
+        }
+        let explicit = arguments["app"]?.stringValue
+        if let explicit, !explicit.isEmpty {
+            targetApp = explicit
+        }
+        var frontmost: String?
+        if targetApp == nil,
+           let application = NSWorkspace.shared.frontmostApplication,
+           application.bundleIdentifier != Bundle.main.bundleIdentifier {
+            frontmost = application.localizedName
+        }
+        let requested = explicit.flatMap { $0.isEmpty ? nil : $0 } ?? targetApp ?? frontmost
+        let app = requested.flatMap { requested in
+            reportedApps.first {
+                $0.name.caseInsensitiveCompare(requested) == .orderedSame
+            }
+        } ?? requested.flatMap { requested in
+            reportedApps.first {
+                $0.name.localizedCaseInsensitiveContains(requested)
+            }
         }
         guard let app else {
-            let target = requested.flatMap { $0.isEmpty ? nil : $0 }
-                ?? frontmost
-                ?? "the frontmost app"
-            let reportedApps = apps.map(\.name).joined(separator: ", ")
-            let list = reportedApps.isEmpty ? "none" : reportedApps
+            let target = requested ?? "the target app"
+            let reportedList = reportedApps.map(\.name).joined(separator: ", ")
+            let list = reportedList.isEmpty ? "none" : reportedList
             let message = "Could not match \(target) among running apps: \(list)"
             return ToolOutput(text: message, content: message, image: nil)
         }
+        targetApp = app.name
         let windows = try await CuaDriver.shared.windows(pid: app.pid)
-        guard let window = windows.first else {
+        let preferredWindowID = app.pid == lastPID ? lastWindowID : nil
+        guard let window = Self.pickWindow(windows, preferring: preferredWindowID) else {
             lastPID = app.pid
             lastWindowID = nil
             lastSnapshot = nil
             return ToolOutput(
-                text: "Running apps: \(apps.map(\.name).joined(separator: ", ")); \(app.name) has no window.",
-                content: "Running apps: \(apps.map(\.name).joined(separator: ", ")); \(app.name) has no window.",
+                text: "Running apps: \(reportedApps.map(\.name).joined(separator: ", ")); \(app.name) has no window.",
+                content: "Running apps: \(reportedApps.map(\.name).joined(separator: ", ")); \(app.name) has no window.",
                 image: nil
             )
         }
+        Log.cua.info(
+            "chosen window title=\(window.title, privacy: .public) app=\(app.name, privacy: .public)"
+        )
         let wantsImage = arguments["screenshot"]?.boolValue ?? false
         let includeImage = wantsImage || windows.count < 3
         let snapshot = try await CuaDriver.shared.windowState(
@@ -284,12 +331,49 @@ final class AgentRunner: ObservableObject {
         let extra = includeImage && !Permission.screenRecording.isGranted
             ? " Screenshot unavailable: allow Screen Recording and proceed with AX only."
             : ""
-        let tree = String(snapshot.treeMarkdown.prefix(6000))
-        let omitted = max(0, snapshot.elements.count - tree.split(separator: "\n").count)
-        let text = "Running apps: \(apps.map(\.name).joined(separator: ", ")); " +
+        let interactiveRoles: Set<String> = [
+            "AXButton", "AXLink", "AXTextField", "AXTextArea", "AXMenuItem",
+            "AXTab", "AXCheckBox", "AXRadioButton", "AXPopUpButton", "AXComboBox",
+            "AXRow", "AXCell",
+        ]
+        let hasRoleData = snapshot.elements.contains { !$0.role.isEmpty }
+        let treeSource: String
+        if hasRoleData {
+            let ordered = snapshot.elements.enumerated().sorted {
+                let lhs = interactiveRoles.contains($0.element.role)
+                let rhs = interactiveRoles.contains($1.element.role)
+                return lhs != rhs ? lhs : $0.offset < $1.offset
+            }.map { _, element in
+                let value = element.value.map { " value=\($0)" } ?? ""
+                return "[\(element.token)] \(element.role) \(element.label)\(value)"
+            }.joined(separator: "\n")
+            treeSource = ordered
+        } else {
+            treeSource = snapshot.treeMarkdown
+        }
+        let tree = String(treeSource.prefix(14000))
+        let shownLines = tree.split(separator: "\n").count
+        let omitted = max(0, snapshot.elements.count - shownLines)
+        let text = "Running apps: \(reportedApps.map(\.name).joined(separator: ", ")); " +
             "frontmost window: \(window.title). Elements: \(snapshot.elements.count).\n" +
             "\(tree)\(omitted > 0 ? "\n… \(omitted) more" : "")\(extra)"
         return ToolOutput(text: text, content: text, image: snapshot.image)
+    }
+
+    static func pickWindow(_ windows: [CuaWindow], preferring lastWindowID: Int?) -> CuaWindow? {
+        if let lastWindowID,
+           let previous = windows.first(where: { $0.id == lastWindowID }) {
+            return previous
+        }
+        guard let qualifying = windows.first(where: { window in
+            guard let frame = window.frame else { return false }
+            return (frame["width"] ?? 0) >= 200
+                && (frame["height"] ?? 0) >= 150
+                && !window.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        }) else {
+            return windows.first
+        }
+        return qualifying
     }
 
     private func afterMutation(_ text: String) async throws -> ToolOutput {

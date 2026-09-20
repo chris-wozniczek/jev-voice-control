@@ -159,6 +159,7 @@ final class CuaDriver: ObservableObject {
         state = .starting
         do {
             let binary = try driverURL()
+            Log.cua.info("spawning cua helper path=\(binary.path, privacy: .public)")
             let socket = FileManager.default.temporaryDirectory
                 .appendingPathComponent("jev-cua-\(ProcessInfo.processInfo.processIdentifier).sock")
             try? FileManager.default.removeItem(at: socket)
@@ -216,7 +217,7 @@ final class CuaDriver: ObservableObject {
                     "capabilities": .object([:]),
                     "clientInfo": .object([
                         "name": .string("JevVoice"),
-                        "version": .string("0.3.0"),
+                        "version": .string("0.3.1"),
                     ]),
                 ])
             )
@@ -225,14 +226,17 @@ final class CuaDriver: ObservableObject {
                 "method": .string("notifications/initialized"),
             ]))
             state = .ready
+            Log.cua.info("cua helper ready socket=\(socket.path, privacy: .public)")
         } catch {
             state = .failed(error.localizedDescription)
+            Log.cua.info("cua helper start failed error=\(error.localizedDescription, privacy: .public)")
             shutdown()
             throw error
         }
     }
 
     func shutdown() {
+        Log.cua.info("shutting down cua helper")
         state = .stopped
         for continuation in pending.values {
             continuation.resume(throwing: CuaDriverError.processExited)
@@ -293,17 +297,19 @@ final class CuaDriver: ObservableObject {
     func apps() async throws -> [CuaApp] {
         let result = try await call("list_apps")
         let records = result.structured?["apps"]?.arrayValue ?? []
-        return records.compactMap { value in
+        let apps: [CuaApp] = records.compactMap { value in
             guard let object = value.objectValue, let pid = object["pid"]?.intValue,
                   let name = object["name"]?.stringValue else { return nil }
             return CuaApp(pid: pid, name: name, bundleId: object["bundle_id"]?.stringValue)
         }
+        Log.cua.info("apps count=\(apps.count)")
+        return apps
     }
 
     func windows(pid: Int) async throws -> [CuaWindow] {
         let result = try await call("list_windows", ["pid": .number(Double(pid))])
         let records = result.structured?["windows"]?.arrayValue ?? []
-        return records.compactMap { value in
+        let windows: [CuaWindow] = records.compactMap { value in
             guard let object = value.objectValue, let id = object["window_id"]?.intValue else {
                 return nil
             }
@@ -312,6 +318,8 @@ final class CuaDriver: ObservableObject {
             }
             return CuaWindow(id: id, title: object["title"]?.stringValue ?? "", frame: frame)
         }
+        Log.cua.info("windows pid=\(pid) count=\(windows.count)")
+        return windows
     }
 
     func windowState(pid: Int, windowId: Int, includeImage: Bool = true) async throws -> CuaSnapshot {
@@ -391,6 +399,8 @@ final class CuaDriver: ObservableObject {
     private func send(method: String, params: JSONValue) async throws -> JSONValue {
         nextID += 1
         let id = nextID
+        let started = Date()
+        Log.cua.info("request method=\(method, privacy: .public)")
         let request = JSONValue.object([
             "jsonrpc": .string("2.0"),
             "id": .number(Double(id)),
@@ -403,14 +413,25 @@ final class CuaDriver: ObservableObject {
             self?.failPending(id: id, error: CuaDriverError.timeout)
         }
         defer { timeoutTask.cancel() }
-        return try await withCheckedThrowingContinuation { continuation in
-            pending[id] = continuation
-            do {
-                try write(request)
-            } catch {
-                pending.removeValue(forKey: id)
-                continuation.resume(throwing: error)
+        do {
+            let result = try await withCheckedThrowingContinuation { continuation in
+                pending[id] = continuation
+                do {
+                    try write(request)
+                } catch {
+                    pending.removeValue(forKey: id)
+                    continuation.resume(throwing: error)
+                }
             }
+            Log.cua.info(
+                "request method=\(method, privacy: .public) elapsed=\(Date().timeIntervalSince(started))"
+            )
+            return result
+        } catch {
+            Log.cua.info(
+                "request method=\(method, privacy: .public) error=\(error.localizedDescription, privacy: .public) elapsed=\(Date().timeIntervalSince(started))"
+            )
+            throw error
         }
     }
 
@@ -421,6 +442,7 @@ final class CuaDriver: ObservableObject {
 
     private func processDidExit() {
         guard state != .stopped else { return }
+        Log.cua.info("cua helper exited unexpectedly")
         for continuation in pending.values {
             continuation.resume(throwing: CuaDriverError.processExited)
         }

@@ -169,6 +169,13 @@ struct ContentView: View {
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.secondary)
                 Spacer()
+                if controller.status != .thinking && controller.status != .executing {
+                    Button("Clear") {
+                        controller.clearHistory()
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(.secondary)
+                }
                 if case .error(let message) = controller.status {
                     Text(message)
                         .font(.caption2)
@@ -198,29 +205,40 @@ struct ContentView: View {
                         .buttonStyle(.borderedProminent)
                         .tint(.red)
                         .controlSize(.small)
+                } else {
+                    Button("Clear") {
+                        agentRunner.clearSteps()
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(.secondary)
                 }
             }
-            ForEach(Array(agentRunner.steps.suffix(8))) { step in
-                Card {
-                    HStack(spacing: 8) {
-                        stepIcon(step.result)
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("\(step.index). \(step.tool)")
-                                .font(.callout.weight(.medium))
-                            if !step.argsSummary.isEmpty {
-                                Text(step.argsSummary)
-                                    .font(.caption2)
-                                    .foregroundStyle(.secondary)
-                                    .lineLimit(1)
+            ScrollView {
+                VStack(spacing: 8) {
+                    ForEach(agentRunner.steps) { step in
+                        Card {
+                            HStack(spacing: 8) {
+                                stepIcon(step.result)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text("\(step.index). \(step.tool)")
+                                        .font(.callout.weight(.medium))
+                                    if !step.argsSummary.isEmpty {
+                                        Text(step.argsSummary)
+                                            .font(.caption2)
+                                            .foregroundStyle(.secondary)
+                                            .lineLimit(1)
+                                    }
+                                }
+                                Spacer()
+                                Text(String(format: "%.1fs", step.elapsed))
+                                    .font(.caption2.monospacedDigit())
+                                    .foregroundStyle(.tertiary)
                             }
                         }
-                        Spacer()
-                        Text(String(format: "%.1fs", step.elapsed))
-                            .font(.caption2.monospacedDigit())
-                            .foregroundStyle(.tertiary)
                     }
                 }
             }
+            .frame(maxHeight: 220)
         }
     }
 

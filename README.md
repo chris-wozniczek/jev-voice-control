@@ -101,6 +101,16 @@ defaults write com.chriswozniczek.jevvoice typesafeAPIKey <key>
 - **Accessibility** — required for the Cmd+V paste used by dictation
 - **Automation** — required for `osascript` volume/brightness actions
 
+## Debugging
+
+Inspect recent Jev Voice logs with:
+
+```sh
+log show --last 5m --predicate 'subsystem == "com.chriswozniczek.jevvoice"' --info
+```
+
+The step list includes a **Clear** button for removing completed local steps.
+
 ## Limitations
 
 - Jev is text-only and never generates strings, so URLs/queries/dictation come

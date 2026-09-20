@@ -115,6 +115,19 @@ final class VoiceController: ObservableObject {
         missingPermissions = Permission.missing
     }
 
+    func clearHistory() {
+        decisions = []
+        if case .done = status {
+            suggestions = []
+            suggestionClause = ""
+            status = .idle
+        } else if case .error = status {
+            suggestions = []
+            suggestionClause = ""
+            status = .idle
+        }
+    }
+
     func requestMissingPermissions() async {
         for permission in Permission.missing where permission.canPrompt {
             await permission.request()
@@ -175,6 +188,9 @@ final class VoiceController: ObservableObject {
         status = .thinking
         onListeningChanged?(false)
         transcript = text
+        if !AgentRunner.shared.isRunning {
+            AgentRunner.shared.clearSteps()
+        }
 
         let registry = AppRegistry.shared
         let client = JevClient(apiKey: config.apiKey)
@@ -194,12 +210,16 @@ final class VoiceController: ObservableObject {
             for i in result.indices { result[i].latencyMs = latencyMs }
             decisions = result
             history = (result + history).prefix(10).map { $0 }
-            if !decisions.contains(where: { $0.action != .none }),
-               await offerSuggestions(for: text, decisions: decisions) {
-                return
-            }
         } catch {
             interpretationError = error
+        }
+        Log.command.info(
+            "transcript=\(text, privacy: .public) decisions=\(self.decisions.count) error=\((interpretationError?.localizedDescription ?? "none"), privacy: .public)"
+        )
+        for decision in decisions {
+            Log.command.info(
+                "decision action=\(decision.action.rawValue, privacy: .public) target=\((decision.targetApp ?? ""), privacy: .public) confidence=\(decision.confidence) model=\(decision.model, privacy: .public)"
+            )
         }
 
         let verdict = ExecutionPolicy.verdict(for: decisions, alwaysConfirm: config.alwaysConfirm)
@@ -209,18 +229,27 @@ final class VoiceController: ObservableObject {
         } else {
             verdictIsReject = false
         }
+        Log.command.info("verdict=\(String(describing: verdict), privacy: .public)")
         if config.computerUseEnabled,
            config.deepSeekAPIKey.isEmpty,
            interpretationError != nil || decisions.isEmpty || verdictIsReject {
+            Log.command.info("route=needs-key")
             let message = "Add a DeepSeek API key in Settings to let Jev do open-ended tasks"
             status = .error(message)
             await speakIfEnabled(message)
             onDone?()
             return
         }
-        if shouldUseComputerAgent(
+        let routesToAgent = shouldUseComputerAgent(
             transcript: text, decisions: decisions, verdict: verdict, error: interpretationError
-        ) {
+        )
+        Log.command.info("route=\(routesToAgent ? "agent" : "local", privacy: .public)")
+        if !routesToAgent,
+           !decisions.contains(where: { $0.action != .none }),
+           await offerSuggestions(for: text, decisions: decisions) {
+            return
+        }
+        if routesToAgent {
             await agentFallback(transcript: text)
             return
         }
@@ -237,7 +266,7 @@ final class VoiceController: ObservableObject {
         case .confirm(let reason):
             await requestVoiceConfirmation(reason: reason)
         case .reject(let reason):
-            if await offerSuggestions(for: text, decisions: decisions) {
+            if !routesToAgent, await offerSuggestions(for: text, decisions: decisions) {
                 return
             }
             status = .error(reason)
@@ -373,9 +402,16 @@ final class VoiceController: ObservableObject {
                    [.openApp, .switchApp, .openURL, .webSearch].contains(previousAction) {
                     try await Task.sleep(nanoseconds: 700_000_000)
                 }
-                results.append(try await Executor.execute(decision))
+                let result = try await Executor.execute(decision)
+                results.append(result)
+                Log.command.info(
+                    "executor result action=\(decision.action.rawValue, privacy: .public) result=\(result, privacy: .public)"
+                )
                 previousAction = decision.action
             } catch {
+                Log.command.info(
+                    "executor error action=\(decision.action.rawValue, privacy: .public) error=\(error.localizedDescription, privacy: .public)"
+                )
                 status = .error(error.localizedDescription)
                 speakError(error.localizedDescription)
                 onDone?()
