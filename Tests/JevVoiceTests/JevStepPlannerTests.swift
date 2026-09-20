@@ -60,6 +60,23 @@ final class JevStepPlannerTests: XCTestCase {
     }
 
     @MainActor
+    func testGoalReachedAfterMutationReturnsDoneDespiteLowActionConfidence() async throws {
+        let fake = FakeJev(answer: .choice(choice: "stuck", confidence: 0.1, probabilities: ["stuck": 0.9]), goalReached: 0.9)
+        let planner = JevStepPlanner(client: fake, canEscalate: false)
+        let turn = try await planner.next(PlannerContext(
+            goal: "open a new session",
+            targetApp: "Devin",
+            snapshot: snapshot([
+                CuaElement(token: "tok-new", role: "AXButton", label: "New Session", value: nil),
+            ]),
+            history: [PlannerStepRecord(tool: "click", argsSummary: "element_token=tok", resultText: "Clicked", succeeded: true)],
+            stepIndex: 1
+        ))
+        XCTAssertEqual(turn.toolCalls.first?.name, "done")
+        XCTAssertEqual(turn.toolCalls.first?.arguments["summary"]?.stringValue, "Done: open a new session")
+    }
+
+    @MainActor
     func testDoneWithLowGoalConfidenceChoosesAlternative() async throws {
         let fake = FakeJev(
             answer: .choice(choice: "done", confidence: 0.9, probabilities: ["done": 0.9, "e1": 0.6]),

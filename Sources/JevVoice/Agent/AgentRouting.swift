@@ -53,28 +53,6 @@ extension VoiceController {
         return dictateOnly && words >= 4 && !startsWithLocalVerb
     }
 
-    static func shouldRoute(
-        transcript: String,
-        decisions: [Decision],
-        verdict: ExecutionPolicy.Verdict,
-        hasKey: Bool,
-        enabled: Bool,
-        installedApps: [String] = [],
-        aliases: [String: String] = [:],
-        error: Error? = nil
-    ) -> Bool {
-        shouldRoute(
-            transcript: transcript,
-            decisions: decisions,
-            verdict: verdict,
-            agentAvailable: hasKey,
-            enabled: enabled,
-            installedApps: installedApps,
-            aliases: aliases,
-            error: error
-        )
-    }
-
     private var agentAvailable: Bool {
         config.plannerMode == .jev
             ? !config.apiKey.isEmpty

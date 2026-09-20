@@ -88,7 +88,7 @@ final class AgentTests: XCTestCase {
             "could you inspect this window",
         ] {
             XCTAssertTrue(VoiceController.shouldRoute(
-                transcript: transcript, decisions: [], verdict: safe, hasKey: true, enabled: true
+                transcript: transcript, decisions: [], verdict: safe, agentAvailable: true, enabled: true
             ))
         }
         for transcript in [
@@ -98,7 +98,7 @@ final class AgentTests: XCTestCase {
         ] {
             let decision = Decision(clause: transcript, action: .dictate)
             XCTAssertFalse(VoiceController.shouldRoute(
-                transcript: transcript, decisions: [decision], verdict: safe, hasKey: true, enabled: true
+                transcript: transcript, decisions: [decision], verdict: safe, agentAvailable: true, enabled: true
             ))
         }
     }
@@ -108,7 +108,7 @@ final class AgentTests: XCTestCase {
         for transcript in ["open a new session", "click new session", "start a new session"] {
             let decision = Decision(clause: transcript, action: .none, confidence: 0.4, model: "jev")
             XCTAssertTrue(VoiceController.shouldRoute(
-                transcript: transcript, decisions: [decision], verdict: .run, hasKey: true, enabled: true
+                transcript: transcript, decisions: [decision], verdict: .run, agentAvailable: true, enabled: true
             ), transcript)
         }
     }
@@ -124,7 +124,7 @@ final class AgentTests: XCTestCase {
                 transcript: transcript,
                 decisions: [],
                 verdict: .run,
-                hasKey: false,
+                agentAvailable: false,
                 enabled: true
             ))
         }
@@ -153,7 +153,7 @@ final class AgentTests: XCTestCase {
             transcript: "open a new session in devin",
             decisions: [decision],
             verdict: .run,
-            hasKey: true,
+            agentAvailable: true,
             enabled: true,
             installedApps: ["Devin", "Google Chrome"],
             aliases: AppMatcher.builtInAliases
@@ -162,7 +162,7 @@ final class AgentTests: XCTestCase {
             transcript: "open a new session in devin",
             decisions: [decision],
             verdict: .run,
-            hasKey: false,
+            agentAvailable: false,
             enabled: true,
             installedApps: ["Devin", "Google Chrome"],
             aliases: AppMatcher.builtInAliases
@@ -192,7 +192,7 @@ final class AgentTests: XCTestCase {
                 transcript: clause,
                 decisions: decision.map { [$0] } ?? [],
                 verdict: .run,
-                hasKey: true,
+                agentAvailable: true,
                 enabled: true,
                 installedApps: apps,
                 aliases: aliases
@@ -211,7 +211,7 @@ final class AgentTests: XCTestCase {
             transcript: "open a new session",
             decisions: [decision],
             verdict: .run,
-            hasKey: true,
+            agentAvailable: true,
             enabled: true,
             installedApps: ["Devin"],
             aliases: AppMatcher.builtInAliases
@@ -220,7 +220,7 @@ final class AgentTests: XCTestCase {
             transcript: "open a new session",
             decisions: [decision],
             verdict: .run,
-            hasKey: false,
+            agentAvailable: false,
             enabled: true,
             installedApps: ["Devin"],
             aliases: AppMatcher.builtInAliases
@@ -249,7 +249,7 @@ final class AgentTests: XCTestCase {
             transcript: "open chrome and search for bananas",
             decisions: decisions,
             verdict: .run,
-            hasKey: true,
+            agentAvailable: true,
             enabled: true,
             installedApps: apps,
             aliases: aliases

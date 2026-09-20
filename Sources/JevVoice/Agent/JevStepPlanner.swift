@@ -149,6 +149,14 @@ final class JevStepPlanner: ActionPlanner {
         } else {
             needsText = 0
         }
+        if goalReached >= 0.7,
+           ctx.history.contains(where: { ["click", "click_at", "type_text", "press_key", "open_app"].contains($0.tool) }) {
+            return makeTurn(call: DeepSeekToolCall(
+                id: "jev-\(ctx.stepIndex + 1)",
+                name: "done",
+                arguments: ["summary": .string(summary(for: ctx.goal))]
+            ))
+        }
         Log.agent.info(
             "jev step latency=\(latency) choice=\(choice, privacy: .public) confidence=\(confidence)"
         )
@@ -176,14 +184,6 @@ final class JevStepPlanner: ActionPlanner {
                 app: ctx.targetApp,
                 step: ctx.stepIndex + 1
             )
-        }
-        if goalReached >= 0.7,
-           ctx.history.contains(where: { ["click", "click_at", "type_text", "press_key", "open_app"].contains($0.tool) }) {
-            return makeTurn(call: DeepSeekToolCall(
-                id: "jev-\(ctx.stepIndex + 1)",
-                name: "done",
-                arguments: ["summary": .string(summary(for: ctx.goal))]
-            ))
         }
         if selectedChoice == "stuck" {
             if canEscalate { return escalation("Jev could not find a control to advance the goal") }
