@@ -11,6 +11,14 @@ enum SpeechEngineKind: String, CaseIterable {
     case apple, whisper
 }
 
+enum DeepSeekThinking: String, CaseIterable {
+    case off, low, high
+}
+
+enum PlannerMode: String, CaseIterable {
+    case jev, deepSeek
+}
+
 final class Config: ObservableObject {
     static let shared = Config()
 
@@ -51,6 +59,14 @@ final class Config: ObservableObject {
 	@Published var computerUseEnabled: Bool {
 		didSet { UserDefaults.standard.set(computerUseEnabled, forKey: "computerUseEnabled") }
 	}
+
+    @Published var plannerMode: PlannerMode {
+        didSet { UserDefaults.standard.set(plannerMode.rawValue, forKey: "plannerMode") }
+    }
+
+    @Published var deepSeekThinking: DeepSeekThinking {
+        didSet { UserDefaults.standard.set(deepSeekThinking.rawValue, forKey: "deepSeekThinking") }
+    }
 
     @Published var listeningMode: ListeningMode {
         didSet { UserDefaults.standard.set(listeningMode.rawValue, forKey: "listeningMode") }
@@ -95,6 +111,12 @@ final class Config: ObservableObject {
             ?? ProcessInfo.processInfo.environment["DEEPSEEK_API_KEY"]
             ?? ""
         self.computerUseEnabled = defaults.object(forKey: "computerUseEnabled") as? Bool ?? true
+        self.plannerMode = PlannerMode(
+            rawValue: defaults.string(forKey: "plannerMode") ?? ""
+        ) ?? .jev
+        self.deepSeekThinking = DeepSeekThinking(
+            rawValue: defaults.string(forKey: "deepSeekThinking") ?? ""
+        ) ?? .off
         self.listeningMode = ListeningMode(
             rawValue: defaults.string(forKey: "listeningMode") ?? ""
         ) ?? .toggle

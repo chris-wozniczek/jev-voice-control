@@ -38,6 +38,7 @@ final class AgentRunner: ObservableObject {
     private var lastPID: Int?
     private var lastWindowID: Int?
     private var lastSnapshot: CuaSnapshot?
+    private var lastWindowTitle: String?
     private var targetApp: String?
     private var confirmationContinuation: CheckedContinuation<Bool, Never>?
     private var cancellationRequested = false
@@ -45,11 +46,40 @@ final class AgentRunner: ObservableObject {
     private init() {}
 
     func run(goal: String, context: AgentContext = AgentContext()) async -> AgentOutcome {
-        await run(
-            goal: goal,
-            context: context,
-            planner: DeepSeekPlanner(apiKey: Config.shared.deepSeekAPIKey)
-        )
+        let config = Config.shared
+        switch config.plannerMode {
+        case .jev:
+            guard !config.apiKey.isEmpty else {
+                return .failed("Add a TypeSafe API key in Settings")
+            }
+            let jev = JevStepPlanner(
+                client: JevClient(apiKey: config.apiKey),
+                canEscalate: !config.deepSeekAPIKey.isEmpty
+            )
+            let deepSeek = config.deepSeekAPIKey.isEmpty
+                ? nil
+                : DeepSeekPlanner(
+                    apiKey: config.deepSeekAPIKey,
+                    thinking: config.deepSeekThinking
+                )
+            return await run(
+                goal: goal,
+                context: context,
+                planner: CascadePlanner(jev: jev, deepSeek: deepSeek)
+            )
+        case .deepSeek:
+            guard !config.deepSeekAPIKey.isEmpty else {
+                return .failed("Add a DeepSeek API key in Settings")
+            }
+            return await run(
+                goal: goal,
+                context: context,
+                planner: DeepSeekPlanner(
+                    apiKey: config.deepSeekAPIKey,
+                    thinking: config.deepSeekThinking
+                )
+            )
+        }
     }
 
     func run(
@@ -74,10 +104,12 @@ final class AgentRunner: ObservableObject {
         lastPID = nil
         lastWindowID = nil
         lastSnapshot = nil
+        lastWindowTitle = nil
         let frontmost = context.frontmostApp
             ?? NSWorkspace.shared.frontmostApplication?.localizedName
             ?? "unknown"
-        var plannerContext = PlannerContext(messages: [
+        var plannerContext = PlannerContext(
+            messages: [
             DeepSeekMessage(
                 role: "system",
                 content: .string(AgentPrompt.system),
@@ -95,7 +127,14 @@ final class AgentRunner: ObservableObject {
                 toolCallID: nil,
                 toolCalls: nil
             ),
-        ])
+            ],
+            goal: goal,
+            targetApp: targetApp,
+            windowTitle: nil,
+            snapshot: nil,
+            history: [],
+            stepIndex: 0
+        )
         let deadline = Date().addingTimeInterval(90)
         var callCount = 0
 
@@ -133,6 +172,16 @@ final class AgentRunner: ObservableObject {
                     plannerContext.messages.append(toolMessage(
                         id: call.id, content: output.content, image: output.image
                     ))
+                    plannerContext.snapshot = lastSnapshot
+                    plannerContext.windowTitle = lastWindowTitle
+                    plannerContext.targetApp = targetApp
+                    plannerContext.history.append(PlannerStepRecord(
+                        tool: call.name,
+                        argsSummary: step.argsSummary,
+                        resultText: output.text,
+                        succeeded: true
+                    ))
+                    plannerContext.stepIndex = callCount
                     if call.name == "done" {
                         outcomeDescription = "done"
                         return .done(output.text)
@@ -153,6 +202,16 @@ final class AgentRunner: ObservableObject {
                     plannerContext.messages.append(toolMessage(
                         id: call.id, content: error.localizedDescription, image: nil
                     ))
+                    plannerContext.snapshot = lastSnapshot
+                    plannerContext.windowTitle = lastWindowTitle
+                    plannerContext.targetApp = targetApp
+                    plannerContext.history.append(PlannerStepRecord(
+                        tool: call.name,
+                        argsSummary: step.argsSummary,
+                        resultText: error.localizedDescription,
+                        succeeded: false
+                    ))
+                    plannerContext.stepIndex = callCount
                 }
             }
             throw AgentError.budget
@@ -327,6 +386,7 @@ final class AgentRunner: ObservableObject {
         )
         lastPID = app.pid
         lastWindowID = window.id
+        lastWindowTitle = window.title
         lastSnapshot = snapshot
         let extra = includeImage && !Permission.screenRecording.isGranted
             ? " Screenshot unavailable: allow Screen Recording and proceed with AX only."

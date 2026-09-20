@@ -52,6 +52,13 @@ final class SlotExtractorTests: XCTestCase {
         )
     }
 
+    func testTypedText() {
+        XCTAssertEqual(SlotExtractor.typedText(from: "type hello there"), "hello there")
+        XCTAssertEqual(SlotExtractor.typedText(from: "write a note saying hello"), "hello")
+        XCTAssertEqual(SlotExtractor.typedText(from: "ask it to analyze this"), "analyze this")
+        XCTAssertNil(SlotExtractor.typedText(from: "click new session"))
+    }
+
     func testPercentDigits() {
         XCTAssertEqual(SlotExtractor.numberPercent(from: "set volume to 30 percent"), 30)
     }

@@ -67,9 +67,21 @@ struct SettingsView: View {
                         VStack(alignment: .leading, spacing: 8) {
                             SecureField("DeepSeek API key", text: $config.deepSeekAPIKey)
                                 .textFieldStyle(.roundedBorder)
-                            Toggle("Let Jev operate apps (DeepSeek Flash + Cua)", isOn: $config.computerUseEnabled)
+                            Picker("Planner", selection: $config.plannerMode) {
+                                Text("Jev (fast, picks from what's on screen)").tag(PlannerMode.jev)
+                                Text("DeepSeek Flash (open-ended)").tag(PlannerMode.deepSeek)
+                            }
+                            Picker("DeepSeek thinking", selection: $config.deepSeekThinking) {
+                                Text("Off (fastest)").tag(DeepSeekThinking.off)
+                                Text("Low").tag(DeepSeekThinking.low)
+                                Text("High").tag(DeepSeekThinking.high)
+                            }
+                            Toggle("Let Jev operate apps (Cua)", isOn: $config.computerUseEnabled)
                                 .toggleStyle(.switch)
                                 .controlSize(.small)
+                            Text("Optional in Jev mode: used for screens without accessible controls.")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
                             HStack {
                                 Text(driverStatus)
                                     .font(.caption)

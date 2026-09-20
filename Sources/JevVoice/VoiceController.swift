@@ -223,23 +223,7 @@ final class VoiceController: ObservableObject {
         }
 
         let verdict = ExecutionPolicy.verdict(for: decisions, alwaysConfirm: config.alwaysConfirm)
-        let verdictIsReject: Bool
-        if case .reject = verdict {
-            verdictIsReject = true
-        } else {
-            verdictIsReject = false
-        }
         Log.command.info("verdict=\(String(describing: verdict), privacy: .public)")
-        if config.computerUseEnabled,
-           config.deepSeekAPIKey.isEmpty,
-           interpretationError != nil || decisions.isEmpty || verdictIsReject {
-            Log.command.info("route=needs-key")
-            let message = "Add a DeepSeek API key in Settings to let Jev do open-ended tasks"
-            status = .error(message)
-            await speakIfEnabled(message)
-            onDone?()
-            return
-        }
         let routesToAgent = shouldUseComputerAgent(
             transcript: text, decisions: decisions, verdict: verdict, error: interpretationError
         )
@@ -388,9 +372,7 @@ final class VoiceController: ObservableObject {
     private func executeAll() async {
         let actionable = decisions.filter { $0.action != .none }
         guard !actionable.isEmpty else {
-            let reason = config.computerUseEnabled
-                ? "Add a DeepSeek API key in Settings to let Jev do open-ended tasks"
-                : "I don't know how to do that locally. Turn on Computer use in Settings."
+            let reason = agentUnavailableReason()
             status = .error(reason)
             await speakIfEnabled(reason)
             onDone?()
@@ -427,6 +409,16 @@ final class VoiceController: ObservableObject {
             await speaker.say(results.joined(separator: ". "))
         }
         onDone?()
+    }
+
+    func agentUnavailableReason() -> String {
+        if !config.computerUseEnabled {
+            return "I don't know how to do that locally. Turn on Computer use in Settings."
+        }
+        if config.plannerMode == .jev {
+            return "Add a TypeSafe API key in Settings to let Jev operate apps"
+        }
+        return "Add a DeepSeek API key in Settings to let Jev do open-ended tasks"
     }
 
     private func speakError(_ message: String) {

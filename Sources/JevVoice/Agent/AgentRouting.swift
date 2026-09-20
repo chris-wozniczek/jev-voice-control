@@ -11,7 +11,7 @@ extension VoiceController {
             transcript: transcript,
             decisions: decisions,
             verdict: verdict,
-            hasKey: !config.deepSeekAPIKey.isEmpty,
+            agentAvailable: agentAvailable,
             enabled: config.computerUseEnabled,
             installedApps: AppRegistry.shared.names,
             aliases: AppRegistry.shared.aliases,
@@ -23,13 +23,13 @@ extension VoiceController {
         transcript: String,
         decisions: [Decision],
         verdict: ExecutionPolicy.Verdict,
-        hasKey: Bool,
+        agentAvailable: Bool,
         enabled: Bool,
         installedApps: [String] = [],
         aliases: [String: String] = [:],
         error: Error? = nil
     ) -> Bool {
-        guard enabled, hasKey else { return false }
+        guard enabled, agentAvailable else { return false }
         if error != nil || decisions.isEmpty { return true }
         if case .reject = verdict { return true }
         if decisions.allSatisfy({ $0.action == .none }) { return true }
@@ -51,6 +51,34 @@ extension VoiceController {
         let dictateOnly = decisions.allSatisfy { $0.action == .dictate }
         let words = transcript.split(whereSeparator: { $0.isWhitespace }).count
         return dictateOnly && words >= 4 && !startsWithLocalVerb
+    }
+
+    static func shouldRoute(
+        transcript: String,
+        decisions: [Decision],
+        verdict: ExecutionPolicy.Verdict,
+        hasKey: Bool,
+        enabled: Bool,
+        installedApps: [String] = [],
+        aliases: [String: String] = [:],
+        error: Error? = nil
+    ) -> Bool {
+        shouldRoute(
+            transcript: transcript,
+            decisions: decisions,
+            verdict: verdict,
+            agentAvailable: hasKey,
+            enabled: enabled,
+            installedApps: installedApps,
+            aliases: aliases,
+            error: error
+        )
+    }
+
+    private var agentAvailable: Bool {
+        config.plannerMode == .jev
+            ? !config.apiKey.isEmpty
+            : !config.deepSeekAPIKey.isEmpty
     }
 
     private static func startsWithLocalCommand(_ transcript: String) -> Bool {

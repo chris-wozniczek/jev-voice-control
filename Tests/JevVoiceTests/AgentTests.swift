@@ -57,6 +57,22 @@ final class AgentTests: XCTestCase {
         XCTAssertEqual(turn.toolCalls.first?.arguments["screenshot"]?.boolValue, true)
     }
 
+    @MainActor
+    func testDeepSeekThinkingBodyAndReasoningContentRoundTrip() throws {
+        let off = DeepSeekPlanner.body(messages: [], thinking: .off)
+        XCTAssertEqual(off["thinking"]?["type"]?.stringValue, "disabled")
+        let low = DeepSeekPlanner.body(messages: [], thinking: .low)
+        XCTAssertEqual(low["thinking"]?["type"]?.stringValue, "enabled")
+        XCTAssertEqual(low["reasoning_effort"]?.stringValue, "low")
+
+        let data = Data("""
+        {"choices":[{"message":{"role":"assistant","content":null,"reasoning_content":"brief reasoning","tool_calls":[]}}]}
+        """.utf8)
+        let turn = try DeepSeekPlanner.decodeTurn(data: data)
+        XCTAssertEqual(turn.assistant.reasoningContent, "brief reasoning")
+        XCTAssertEqual(turn.assistant.jsonValue()["reasoning_content"]?.stringValue, "brief reasoning")
+    }
+
     func testDestructiveWordMatching() {
         XCTAssertTrue(AgentRisk.matchesDestructiveWord("Submit order"))
         XCTAssertTrue(AgentRisk.matchesDestructiveWord("Delete this message"))
@@ -112,6 +128,17 @@ final class AgentTests: XCTestCase {
                 enabled: true
             ))
         }
+    }
+
+    @MainActor
+    func testRoutingRequiresAgentAvailability() {
+        XCTAssertFalse(VoiceController.shouldRoute(
+            transcript: "open a new session",
+            decisions: [Decision(clause: "open a new session", action: .none)],
+            verdict: .run,
+            agentAvailable: false,
+            enabled: true
+        ))
     }
 
     @MainActor
