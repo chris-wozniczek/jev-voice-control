@@ -388,7 +388,11 @@ final class VoiceController: ObservableObject {
     private func executeAll() async {
         let actionable = decisions.filter { $0.action != .none }
         guard !actionable.isEmpty else {
-            status = .done
+            let reason = config.computerUseEnabled
+                ? "Add a DeepSeek API key in Settings to let Jev do open-ended tasks"
+                : "I don't know how to do that locally. Turn on Computer use in Settings."
+            status = .error(reason)
+            await speakIfEnabled(reason)
             onDone?()
             return
         }
