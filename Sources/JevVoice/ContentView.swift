@@ -489,6 +489,7 @@ struct DecisionRow: View {
         case .openURL: return "link"
         case .webSearch: return "magnifyingglass"
         case .dictate: return "keyboard"
+        case .uiTask: return "cursorarrow.click"
         case .system: return "slider.horizontal.3"
         case .none: return "minus.circle"
         }

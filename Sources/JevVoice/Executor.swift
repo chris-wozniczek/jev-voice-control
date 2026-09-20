@@ -58,6 +58,8 @@ enum Executor {
         case .dictate:
             guard let text = decision.text else { throw ExecutorError.missingSlot("text") }
             return dictate(text)
+        case .uiTask:
+            throw ExecutorError.controlFailed("uiTask is handled by the agent")
         case .system:
             return try runSystem(decision.systemAction ?? .none, percent: decision.percent)
         case .none:

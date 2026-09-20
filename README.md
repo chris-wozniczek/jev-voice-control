@@ -21,6 +21,11 @@ App names support common aliases such as “chrome”, “code”, “cmux”, a
 voice, and Settings can enable **Ask before running commands** for a
 voice-confirmation step.
 
+Mixed commands combine deterministic local actions with Jev-guided UI work:
+“open Devin and start a new session” = local open + Jev-guided click. The app
+keeps those typed decisions in order, carries the opened app forward as the UI
+task target, and asks for confirmation before actions that sound hard to undo.
+
 Speech is transcribed **on-device** (SFSpeechRecognizer). Only the transcript is
 sent to the Jev API.
 
@@ -42,9 +47,9 @@ microphone ──> SFSpeechRecognizer (on-device) ──> transcript
                                           ClauseSplitter (multi-verb clauses)
                                           │
                               POST /v1/systemone  ──> Jev (typed answers)
-                                per clause: action?   target_app?
+                                            per clause: action?   target_app?
                                             system_action? mentions_url?
-                                            refers_to_frontmost?
+                                            refers_to_frontmost? destructive?
                                                       │
                                  Decision + SlotExtractor (url/query/text/%)
                                                       │
@@ -57,11 +62,12 @@ questions:
 
 | question | type | shape |
 |---|---|---|
-| `action` | choice | one of `openApp`, `closeApp`, `openURL`, `webSearch`, `dictate`, `system`, `none` |
+| `action` | choice | one of `openApp`, `closeApp`, `openURL`, `webSearch`, `dictate`, `uiTask`, `system`, `none` |
 | `target_app` | choice | installed app names (≤254) + `none` |
 | `system_action` | choice | `volumeSet`, `mute`, `lockScreen`, `screenshot`, … |
 | `mentions_url` | noul | probability the clause names a website |
 | `refers_to_frontmost` | noul | "quit it" → the frontmost app |
+| `destructive` | noul | probability the clause is hard to undo |
 
 Arguments (URLs, queries, dictation text, percentages) can't come from Jev —
 it's decision-only — so they're extracted deterministically by `SlotExtractor`

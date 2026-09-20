@@ -8,11 +8,11 @@ public enum ExecutionPolicy {
     }
 
     public static func verdict(for decisions: [Decision], alwaysConfirm: Bool) -> Verdict {
+        if decisions.contains(where: { $0.riskTier == .destructive }) {
+            return .confirm(reason: "This sounds hard to undo — confirm?")
+        }
         if alwaysConfirm {
             return .confirm(reason: "Ask before running is on")
-        }
-        for decision in decisions where decision.riskTier == .destructive {
-            return .confirm(reason: "This action needs confirmation")
         }
         for decision in decisions where Action.appTargeted.contains(decision.action) {
             guard let app = decision.targetApp else {
@@ -31,7 +31,7 @@ public enum ExecutionPolicy {
             }
         }
         if decisions.contains(where: {
-            $0.action != .none && $0.confidence < 0.4
+            $0.action != .none && $0.action != .uiTask && $0.confidence < 0.4
         }) {
             return .confirm(reason: "Low confidence")
         }

@@ -10,6 +10,13 @@ public final class CommandInterpreter {
         "microsoft edge", "opera", "vivaldi", "orion", "duckduckgo",
     ]
 
+    private static let uiTaskVerbs: Set<String> = [
+        "click", "press", "tap", "select", "choose", "start", "create", "new",
+        "open", "add", "scroll", "go", "pick", "toggle", "enable", "disable",
+        "check", "uncheck", "send", "ask", "reply", "search", "find", "play",
+        "pause", "next", "previous",
+    ]
+
     public init(
         client: JevClient,
         installedApps: [String],
@@ -100,10 +107,10 @@ public final class CommandInterpreter {
     private func interpretClauses(
         _ clauses: [String], transcript: String, frontmostApp: String?
     ) async throws -> [Decision] {
-        return try await withThrowingTaskGroup(of: (Int, Decision).self) { group in
+        return try await withThrowingTaskGroup(of: (Int, [Decision]).self) { group in
             for (index, clause) in clauses.enumerated() {
                 group.addTask {
-                    if let local = LocalCommandParser.parse(
+                    if let local = Self.localDecisions(
                         clause: clause,
                         installedApps: self.installedApps,
                         aliases: self.aliases,
@@ -114,13 +121,73 @@ public final class CommandInterpreter {
                     let decision = try await self.interpretClause(
                         clause, transcript: transcript, frontmostApp: frontmostApp
                     )
-                    return (index, decision)
+                    return (index, [decision])
                 }
             }
-            var ordered: [(Int, Decision)] = []
+            var ordered: [(Int, [Decision])] = []
             for try await result in group { ordered.append(result) }
-            return ordered.sorted { $0.0 < $1.0 }.map { $0.1 }
+            return ordered.sorted { $0.0 < $1.0 }.flatMap(\.1)
         }
+    }
+
+    static func localDecisions(
+        clause: String,
+        installedApps: [String],
+        aliases: [String: String],
+        frontmostApp: String?
+    ) -> [Decision]? {
+        guard let local = LocalCommandParser.parse(
+            clause: clause,
+            installedApps: installedApps,
+            aliases: aliases,
+            frontmostApp: frontmostApp
+        ) else {
+            return nil
+        }
+        guard [.openApp, .switchApp].contains(local.action),
+              let targetApp = local.targetApp else {
+            return [local]
+        }
+        let residual = AppMatcher.residualWords(
+            clause: clause,
+            matchedApp: targetApp,
+            aliases: aliases
+        )
+        guard residual.count >= 2 else {
+            return [local]
+        }
+        let spokenVerb = clause
+            .split(whereSeparator: { $0.isWhitespace })
+            .first
+            .map(String.init) ?? "open"
+        let verb = local.action == .switchApp ? "\(spokenVerb) \(spokenVerb == "switch" ? "to " : "")" : "\(spokenVerb) "
+        let reduced = Decision(
+            clause: "\(verb)\(targetApp)",
+            action: local.action,
+            actionProbabilities: local.actionProbabilities,
+            targetApp: local.targetApp,
+            spokenTarget: local.spokenTarget,
+            targetAppProbabilities: local.targetAppProbabilities,
+            systemAction: local.systemAction,
+            url: local.url,
+            query: local.query,
+            text: local.text,
+            percent: local.percent,
+            destructive: local.destructive,
+            confidence: local.confidence,
+            latencyMs: local.latencyMs,
+            model: local.model
+        )
+        return [
+            reduced,
+            Decision(
+                clause: residual.joined(separator: " "),
+                action: .uiTask,
+                targetApp: targetApp,
+                confidence: 0.85,
+                model: "local"
+            ),
+        ]
     }
 
     private func interpretClause(
@@ -154,6 +221,9 @@ public final class CommandInterpreter {
             "refers_to_frontmost": .noul(
                 instructions: "Does the clause \"\(clause)\" refer to the currently active app rather than naming one?"
             ),
+            "destructive": .noul(
+                instructions: "Does the clause \"\(clause)\" ask to delete, remove, send, submit, pay, buy, sign out, shut down, or otherwise do something that is hard to undo?"
+            ),
         ]
 
         let state = State(
@@ -172,6 +242,13 @@ public final class CommandInterpreter {
             action = Action(rawValue: choice) ?? .none
             actionProbs = probs
             actionConfidence = confidence
+        }
+        if action == .none,
+           clause.split(whereSeparator: { $0.isWhitespace }).count >= 2,
+           let firstWord = clause.split(whereSeparator: { $0.isWhitespace }).first?
+            .lowercased(),
+           Self.uiTaskVerbs.contains(firstWord) {
+            action = .uiTask
         }
 
         var targetApp: String?
@@ -210,6 +287,7 @@ public final class CommandInterpreter {
                 clause: clause, installedApps: installedApps, aliases: aliases
             )
         if url == nil, query == nil, action != .openURL, action != .webSearch,
+           action != .uiTask,
            let verbAction = AppMatcher.verbAction(clause: clause), let local = localMatch {
             action = verbAction
             actionConfidence = max(actionConfidence, 0.95)
@@ -245,7 +323,15 @@ public final class CommandInterpreter {
             action = .system
         }
 
-        let confidence = min(actionConfidence, targetConfidence, systemConfidence)
+        let destructive: Bool
+        if case .noul(let probability) = response.answers["destructive"] {
+            destructive = probability > 0.6
+        } else {
+            destructive = false
+        }
+        let confidence = action == .uiTask
+            ? actionConfidence
+            : min(actionConfidence, targetConfidence, systemConfidence)
 
         return Decision(
             clause: clause,
@@ -259,6 +345,7 @@ public final class CommandInterpreter {
             query: query,
             text: text,
             percent: percent,
+            destructive: destructive,
             confidence: confidence,
             latencyMs: latencyMs,
             model: response.model
@@ -268,12 +355,19 @@ public final class CommandInterpreter {
     static func propagateContext(_ decisions: [Decision]) -> [Decision] {
         var result = decisions
         var lastBrowser: String?
+        var lastTarget: String?
         for index in result.indices {
             let decision = result[index]
             if (decision.action == .openApp || decision.action == .switchApp),
-               let targetApp = decision.targetApp,
-               browserNames.contains(targetApp.lowercased()) {
-                lastBrowser = targetApp
+               let targetApp = decision.targetApp {
+                lastTarget = targetApp
+                if browserNames.contains(targetApp.lowercased()) {
+                    lastBrowser = targetApp
+                }
+            } else if decision.action == .uiTask,
+                      result[index].targetApp == nil,
+                      let lastTarget {
+                result[index].targetApp = lastTarget
             } else if (decision.action == .openURL || decision.action == .webSearch),
                       result[index].targetApp == nil {
                 result[index].targetApp = lastBrowser
