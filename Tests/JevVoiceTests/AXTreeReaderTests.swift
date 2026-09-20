@@ -78,6 +78,19 @@ final class AXTreeReaderTests: XCTestCase {
         XCTAssertEqual(result.first?.label, "Search")
     }
 
+    func testEmptyLabelTextInputsUseRoleLabels() throws {
+        let root = FakeNode(role: "AXGroup", children: [
+            FakeNode(role: "AXTextField"),
+            FakeNode(role: "AXTextArea"),
+            FakeNode(role: "AXSearchField"),
+        ])
+        let result = try XCTUnwrap(AXTreeReader.walk(
+            root,
+            deadline: Date().addingTimeInterval(1)
+        ))
+        XCTAssertEqual(result.map { $0.label }, ["text field", "text area", "search field"])
+    }
+
     func testLabelPrecedence() throws {
         let root = FakeNode(role: "AXGroup", children: [
             FakeNode(

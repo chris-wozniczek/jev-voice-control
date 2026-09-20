@@ -22,13 +22,9 @@ private func axAttribute(_ element: AXUIElement, _ name: CFString) -> CFTypeRef?
     return value
 }
 
-private func axString(_ element: AXUIElement, _ name: CFString) -> String? {
-    axAttribute(element, name) as? String
-}
-
-private func axFrame(_ element: AXUIElement) -> CGRect? {
-    guard let position = axAttribute(element, kAXPositionAttribute as CFString),
-          let size = axAttribute(element, kAXSizeAttribute as CFString),
+private func axFrame(position: CFTypeRef?, size: CFTypeRef?) -> CGRect? {
+    guard let position,
+          let size,
           CFGetTypeID(position) == AXValueGetTypeID(),
           CFGetTypeID(size) == AXValueGetTypeID() else {
         return nil
@@ -44,35 +40,57 @@ private func axFrame(_ element: AXUIElement) -> CGRect? {
     return CGRect(origin: point, size: dimensions)
 }
 
+private func axElement(_ value: CFTypeRef?) -> AXUIElement? {
+    guard let value, CFGetTypeID(value) == AXUIElementGetTypeID() else {
+        return nil
+    }
+    return unsafeDowncast(value, to: AXUIElement.self)
+}
+
 private struct AXElementNode: AXNode {
     let element: AXUIElement
+    let role: String
+    let subrole: String?
+    let title: String?
+    let axDescription: String?
+    let stringValue: String?
+    let placeholder: String?
+    let frame: CGRect?
+    private let storedChildren: [AXUIElement]
 
-    var role: String {
-        axString(element, kAXRoleAttribute as CFString) ?? ""
-    }
-
-    var subrole: String? {
-        axString(element, kAXSubroleAttribute as CFString)
-    }
-
-    var title: String? {
-        axString(element, kAXTitleAttribute as CFString)
-    }
-
-    var axDescription: String? {
-        axString(element, kAXDescriptionAttribute as CFString)
-    }
-
-    var stringValue: String? {
-        axString(element, kAXValueAttribute as CFString)
-    }
-
-    var placeholder: String? {
-        axString(element, "AXPlaceholderValue" as CFString)
-    }
-
-    var frame: CGRect? {
-        axFrame(element)
+    init(element: AXUIElement) {
+        self.element = element
+        let attributes: [CFString] = [
+            kAXRoleAttribute as CFString,
+            kAXSubroleAttribute as CFString,
+            kAXTitleAttribute as CFString,
+            kAXDescriptionAttribute as CFString,
+            kAXValueAttribute as CFString,
+            "AXPlaceholderValue" as CFString,
+            kAXPositionAttribute as CFString,
+            kAXSizeAttribute as CFString,
+            kAXChildrenAttribute as CFString,
+        ]
+        var rawValues: CFArray?
+        let result = AXUIElementCopyMultipleAttributeValues(
+            element,
+            attributes as CFArray,
+            [],
+            &rawValues
+        )
+        let values = result == .success ? (rawValues as? [Any]) ?? [] : []
+        role = values[safe: 0] as? String ?? ""
+        subrole = values[safe: 1] as? String
+        title = values[safe: 2] as? String
+        axDescription = values[safe: 3] as? String
+        stringValue = values[safe: 4] as? String
+        placeholder = values[safe: 5] as? String
+        frame = axFrame(
+            position: values[safe: 6] as CFTypeRef?,
+            size: values[safe: 7] as CFTypeRef?
+        )
+        storedChildren = (values[safe: 8] as? [AXUIElement])
+            .map { Array($0.prefix(200)) } ?? []
     }
 
     var actionNames: [String] {
@@ -85,11 +103,13 @@ private struct AXElementNode: AXNode {
     }
 
     var children: [AXElementNode] {
-        guard let value = axAttribute(element, kAXChildrenAttribute as CFString),
-              let children = value as? [AXUIElement] else {
-            return []
-        }
-        return Array(children.prefix(200)).map(AXElementNode.init)
+        storedChildren.map(AXElementNode.init)
+    }
+}
+
+private extension Array {
+    subscript(safe index: Index) -> Element? {
+        indices.contains(index) ? self[index] : nil
     }
 }
 
@@ -151,10 +171,8 @@ enum AXTreeReader {
                     && abs(candidateFrame.size.height - frame.size.height) <= 4
             }
         }
-        let focused = axAttribute(app, kAXFocusedWindowAttribute as CFString)
-            .map { unsafeDowncast($0, to: AXUIElement.self) }
-        let main = axAttribute(app, kAXMainWindowAttribute as CFString)
-            .map { unsafeDowncast($0, to: AXUIElement.self) }
+        let focused = axElement(axAttribute(app, kAXFocusedWindowAttribute as CFString))
+        let main = axElement(axAttribute(app, kAXMainWindowAttribute as CFString))
         return focused ?? main
     }
 
@@ -170,7 +188,9 @@ enum AXTreeReader {
         var seen = Set<NodeKey>()
 
         while index < queue.count {
-            guard Date() < deadline else { return nil }
+            guard Date() < deadline else {
+                return interactiveCount >= 3 ? result : nil
+            }
             let node = queue[index]
             index += 1
             let role = node.role
@@ -180,11 +200,24 @@ enum AXTreeReader {
                 continue
             }
             let isTextInput = ["AXTextField", "AXTextArea", "AXSearchField"].contains(role)
-            let label = node.title
-                ?? node.axDescription
-                ?? node.placeholder
-                ?? ((labelRoles.contains(role) || isTextInput) ? node.stringValue : nil)
-                ?? ""
+            let preferredLabel = [node.title, node.axDescription, node.placeholder]
+                .compactMap { $0 }
+                .first
+            let label: String
+            if let preferredLabel {
+                label = preferredLabel
+            } else if (labelRoles.contains(role) || isTextInput),
+                      let stringValue = node.stringValue,
+                      !stringValue.isEmpty {
+                label = stringValue
+            } else {
+                label = switch role {
+                case "AXTextField": "text field"
+                case "AXTextArea": "text area"
+                case "AXSearchField": "search field"
+                default: ""
+                }
+            }
             let isEmittable = interactiveRoles.contains(role) || labelRoles.contains(role)
             if isEmittable && !label.isEmpty {
                 let key = NodeKey(role: role, label: label, frame: frame)
@@ -205,7 +238,6 @@ enum AXTreeReader {
         return interactiveCount >= 3 ? result : nil
     }
 
-    @MainActor
     static func snapshot(
         pid: Int,
         windowFrame: CGRect?

@@ -641,11 +641,16 @@ final class AgentRunner: ObservableObject {
                 var candidateSnapshot: CuaSnapshot
                 var candidateEntries: [String: AXEntry] = [:]
                 let treeStarted = Date()
-                if Config.shared.nativeAXEnabled,
-                   let ax = AXTreeReader.snapshot(
-                       pid: app.pid,
-                       windowFrame: Self.cgRect(candidate.frame)
-                   ) {
+                let candidateFrame = Self.cgRect(candidate.frame)
+                let nativeSnapshot = Config.shared.nativeAXEnabled
+                    ? await Task.detached(priority: .userInitiated) {
+                        AXTreeReader.snapshot(
+                            pid: app.pid,
+                            windowFrame: candidateFrame
+                        )
+                    }.value
+                    : nil
+                if let ax = nativeSnapshot {
                     let axElapsed = Date().timeIntervalSince(treeStarted)
                     Log.agent.info(
                         "stage=axtree elements=\(ax.snapshot.elements.count) interactive=\(ax.snapshot.elements.filter { AXTreeReader.interactiveRoles.contains($0.role) }.count) elapsed=\(axElapsed)"
@@ -734,11 +739,16 @@ final class AgentRunner: ObservableObject {
             resolvedSnapshot = providedSnapshot
         } else {
             let treeStarted = Date()
-            if Config.shared.nativeAXEnabled,
-               let ax = AXTreeReader.snapshot(
-                   pid: app.pid,
-                   windowFrame: lastWindowFrame ?? Self.cgRect(window.frame)
-            ) {
+            let nativeWindowFrame = lastWindowFrame ?? Self.cgRect(window.frame)
+            let nativeSnapshot = Config.shared.nativeAXEnabled
+                ? await Task.detached(priority: .userInitiated) {
+                    AXTreeReader.snapshot(
+                        pid: app.pid,
+                        windowFrame: nativeWindowFrame
+                    )
+                }.value
+                : nil
+            if let ax = nativeSnapshot {
                 let axElapsed = Date().timeIntervalSince(treeStarted)
                 Log.agent.info(
                     "stage=axtree elements=\(ax.snapshot.elements.count) interactive=\(ax.snapshot.elements.filter { AXTreeReader.interactiveRoles.contains($0.role) }.count) elapsed=\(axElapsed)"
