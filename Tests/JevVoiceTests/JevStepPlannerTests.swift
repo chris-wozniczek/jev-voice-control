@@ -43,6 +43,83 @@ final class JevStepPlannerTests: XCTestCase {
     }
 
     @MainActor
+    func testHintsAddWorkedBeforeContextAndCriteria() async throws {
+        let fake = FakeJev(answer: .choice(choice: "e1", confidence: 0.9, probabilities: ["e1": 0.9]))
+        let hints = HintStore(url: FileManager.default.temporaryDirectory
+            .appendingPathComponent("jev-planner-hints-\(UUID().uuidString).json"))
+        hints.record(app: "Devin", goal: "open a new session", role: "AXButton", label: "New Session")
+        let planner = JevStepPlanner(client: fake, canEscalate: false, hints: hints)
+        _ = try await planner.next(PlannerContext(
+            goal: "open a new session",
+            targetApp: "Devin",
+            snapshot: snapshot([
+                CuaElement(token: "tok-new", role: "AXButton", label: "New Session", value: nil),
+            ])
+        ))
+
+        let state = try XCTUnwrap(fake.states.first?.objectValue)
+        XCTAssertEqual(
+            state["worked_before"]?.arrayValue?.first?.stringValue,
+            "click button \"New Session\""
+        )
+        let criteria = try XCTUnwrap(fake.questions["next_action"]?.choiceCriteria)
+        let e1Criteria = try XCTUnwrap(criteria["e1"] ?? nil)
+        XCTAssertTrue(e1Criteria.contains("worked before"))
+    }
+
+    @MainActor
+    func testUnmatchedHintDoesNotAddCriteriaOrToken() async throws {
+        let fake = FakeJev(answer: .choice(choice: "e9", confidence: 0.9, probabilities: ["e9": 0.9]))
+        let hints = HintStore(url: FileManager.default.temporaryDirectory
+            .appendingPathComponent("jev-planner-hints-\(UUID().uuidString).json"))
+        hints.record(app: "Devin", goal: "open a new session", role: "AXButton", label: "Missing")
+        let planner = JevStepPlanner(client: fake, canEscalate: false, hints: hints)
+        let turn = try await planner.next(PlannerContext(
+            goal: "open a new session",
+            targetApp: "Devin",
+            snapshot: snapshot([
+                CuaElement(token: "tok-new", role: "AXButton", label: "New Session", value: nil),
+            ])
+        ))
+
+        let criteria = try XCTUnwrap(fake.questions["next_action"]?.choiceCriteria)
+        XCTAssertFalse(criteria.values.compactMap { $0 }.contains { $0.contains("worked before") })
+        XCTAssertEqual(turn.toolCalls.first?.name, "fail")
+    }
+
+    @MainActor
+    func testClickedHintIsSkippedForThisRun() async throws {
+        let fake = FakeJev(answer: .choice(choice: "e1", confidence: 0.9, probabilities: ["e1": 0.9]))
+        let hints = HintStore(url: FileManager.default.temporaryDirectory
+            .appendingPathComponent("jev-planner-hints-\(UUID().uuidString).json"))
+        hints.record(app: "Devin", goal: "open a new session", role: "AXButton", label: "New Session")
+        let planner = JevStepPlanner(client: fake, canEscalate: false, hints: hints)
+        _ = try await planner.next(PlannerContext(
+            goal: "open a new session",
+            targetApp: "Devin",
+            snapshot: snapshot([
+                CuaElement(token: "tok-new", role: "AXButton", label: "New Session", value: nil),
+            ]),
+            history: [
+                PlannerStepRecord(
+                    tool: "click",
+                    argsSummary: "element_token=tok-new",
+                    resultText: "Clicked",
+                    succeeded: true,
+                    elementRole: "AXButton",
+                    elementLabel: "New Session"
+                ),
+            ]
+        ))
+
+        let state = try XCTUnwrap(fake.states.first?.objectValue)
+        XCTAssertEqual(state["worked_before"]?.arrayValue?.count, 0)
+        let criteria = try XCTUnwrap(fake.questions["next_action"]?.choiceCriteria)
+        let e1Criteria = try XCTUnwrap(criteria["e1"] ?? nil)
+        XCTAssertFalse(e1Criteria.contains("worked before"))
+    }
+
+    @MainActor
     func testGoalReachedAfterMutationReturnsDone() async throws {
         let fake = FakeJev(answer: .choice(choice: "done", confidence: 0.9, probabilities: ["done": 0.9]), goalReached: 0.85)
         let planner = JevStepPlanner(client: fake, canEscalate: false)

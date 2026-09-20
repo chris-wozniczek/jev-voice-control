@@ -282,6 +282,28 @@ final class AgentTests: XCTestCase {
     }
 
     @MainActor
+    func testCDPIsPreferredForChromeOrThinAccessibilityTrees() {
+        XCTAssertTrue(AgentRunner.shouldTryCDP(bundleId: "com.google.Chrome", interactiveCount: 20))
+        XCTAssertTrue(AgentRunner.shouldTryCDP(bundleId: "com.example.Electron", interactiveCount: 2))
+        XCTAssertFalse(AgentRunner.shouldTryCDP(bundleId: "com.example.App", interactiveCount: 3))
+    }
+
+    @MainActor
+    func testRiskyCDPTokenUsesSnapshotLabel() {
+        let snapshot = CuaSnapshot(
+            snapshotId: "snapshot",
+            treeMarkdown: "",
+            elements: [
+                CuaElement(token: "cdp:1", role: "AXButton", label: "Delete", value: nil),
+            ],
+            image: nil
+        )
+        AgentRunner.shared.setSnapshotForTesting(snapshot)
+        XCTAssertTrue(AgentRunner.shared.isRisky(token: "cdp:1", key: nil))
+        AgentRunner.shared.setSnapshotForTesting(nil)
+    }
+
+    @MainActor
     func testBudgetExhaustion() async {
         let planner = NeverDonePlanner()
         let outcome = await AgentRunner.shared.run(
