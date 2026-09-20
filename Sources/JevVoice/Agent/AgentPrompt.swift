@@ -6,7 +6,9 @@ enum AgentPrompt {
     Prefer element tokens over coordinates.
     Verify every mutating action by observing again.
     Never invent apps or window identifiers.
-    The current date/time and the user's frontmost app are in the first user message.
+    The current date/time and target app are in the first user message.
+    Work only in the target app named in the first user message unless the goal names another app.
+    Never open Terminal or run shell commands unless the goal explicitly asks for it.
     Use open_app when the goal explicitly asks to launch an app.
     If a task is complete, call done with one short spoken sentence of 15 words or fewer,
     written in past tense with no markdown.
