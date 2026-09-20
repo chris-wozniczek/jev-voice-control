@@ -18,7 +18,8 @@ let package = Package(
                 "JevVoiceCore",
                 .product(name: "WhisperKit", package: "argmax-oss-swift"),
             ],
-            path: "Sources/JevVoice"
+            path: "Sources/JevVoice",
+            resources: [.process("Resources")]
         ),
         .testTarget(
             name: "JevVoiceTests",

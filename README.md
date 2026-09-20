@@ -140,6 +140,40 @@ defaults write com.chriswozniczek.jevvoice typesafeAPIKey <key>
 - **Accessibility** — required for the Cmd+V paste used by dictation
 - **Automation** — required for `osascript` volume/brightness actions
 
+### Teaching Jev app shortcuts
+
+Optional app shortcuts provide a fast path for common actions such as opening a
+new session or tab. They are stored in:
+
+```text
+~/Library/Application Support/Jev Voice/app-actions.json
+```
+
+The file contains an `actions` array. Each entry has an `app` name (or `*`),
+an optional `bundleId`, a display `name`, matching `phrases`, and key steps:
+
+```json
+{
+  "actions": [
+    {
+      "app": "Devin",
+      "name": "new session",
+      "phrases": ["new session"],
+      "steps": [
+        {"kind": "key", "key": "n", "modifiers": ["command"]}
+      ]
+    }
+  ]
+}
+```
+
+Disable or edit these shortcuts in Settings. Everything still works through
+the generic observe → Jev → act → verify loop without this file.
+
+Native Accessibility can read the target window's tree in-process for lower
+latency and uses Cua when the tree is too thin. Disable it in Computer use
+settings to use the Cua observer exclusively.
+
 ## Debugging
 
 Inspect recent Jev Voice logs with:

@@ -141,6 +141,7 @@ final class CuaDriver: ObservableObject {
     private var nextID = 0
     private var pending: [Int: CheckedContinuation<JSONValue, Error>] = [:]
     private var readerStarted = false
+    private var processGeneration = 0
 
     private init() {}
 
@@ -157,6 +158,8 @@ final class CuaDriver: ObservableObject {
         }
 
         state = .starting
+        processGeneration += 1
+        let generation = processGeneration
         do {
             let binary = try driverURL()
             Log.cua.info("spawning cua helper path=\(binary.path, privacy: .public)")
@@ -177,7 +180,7 @@ final class CuaDriver: ObservableObject {
             daemon.standardError = FileHandle.standardError
             daemon.terminationHandler = { [weak self] _ in
                 Task { @MainActor [weak self] in
-                    self?.processDidExit()
+                    self?.processDidExit(generation: generation)
                 }
             }
             try daemon.run()
@@ -202,13 +205,13 @@ final class CuaDriver: ObservableObject {
             mcp.standardError = FileHandle.standardError
             mcp.terminationHandler = { [weak self] _ in
                 Task { @MainActor [weak self] in
-                    self?.processDidExit()
+                    self?.processDidExit(generation: generation)
                 }
             }
             try mcp.run()
             self.mcp = mcp
             input = toDriver.fileHandleForWriting
-            startReader(from: fromDriver.fileHandleForReading)
+            startReader(from: fromDriver.fileHandleForReading, generation: generation)
 
             _ = try await send(
                 method: "initialize",
@@ -237,6 +240,7 @@ final class CuaDriver: ObservableObject {
 
     func shutdown() {
         Log.cua.info("shutting down cua helper")
+        processGeneration += 1
         state = .stopped
         for continuation in pending.values {
             continuation.resume(throwing: CuaDriverError.processExited)
@@ -453,8 +457,8 @@ final class CuaDriver: ObservableObject {
         continuation.resume(throwing: error)
     }
 
-    private func processDidExit() {
-        guard state != .stopped else { return }
+    private func processDidExit(generation: Int) {
+        guard generation == processGeneration, state != .stopped else { return }
         Log.cua.info("cua helper exited unexpectedly")
         for continuation in pending.values {
             continuation.resume(throwing: CuaDriverError.processExited)
@@ -471,7 +475,7 @@ final class CuaDriver: ObservableObject {
         state = .failed("Cua driver exited unexpectedly")
     }
 
-    private func startReader(from handle: FileHandle) {
+    private func startReader(from handle: FileHandle, generation: Int) {
         guard !readerStarted else { return }
         readerStarted = true
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
@@ -480,7 +484,7 @@ final class CuaDriver: ObservableObject {
                 let chunk = handle.availableData
                 if chunk.isEmpty {
                     Task { @MainActor [weak self] in
-                        self?.processDidExit()
+                        self?.processDidExit(generation: generation)
                     }
                     return
                 }
