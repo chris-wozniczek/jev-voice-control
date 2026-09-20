@@ -280,7 +280,6 @@ final class WhisperSpeechEngine: SpeechEngine {
         Log.speech.info("Whisper model loading name=\(self.store.selected.id, privacy: .public)")
         onStatus?("Loading model…")
         try startAudio()
-        onListening?()
         loadTask = Task { [weak self] in
             do {
                 guard let self else { return }
@@ -295,6 +294,7 @@ final class WhisperSpeechEngine: SpeechEngine {
                     self.finishTask = nil
                     await self.transcribeLatest(isFinal: true)
                 } else {
+                    self.onListening?()
                     self.partialTask = Task { [weak self] in
                         while !Task.isCancelled {
                             try? await Task.sleep(nanoseconds: 800_000_000)
