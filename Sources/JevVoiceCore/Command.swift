@@ -2,7 +2,7 @@ import Foundation
 
 public enum Action: String, CaseIterable, Codable {
     case openApp, closeApp, switchApp, minimizeApp, maximizeApp, fullscreenApp, restoreApp
-    case hideApp, openURL, webSearch, dictate, system, none
+    case hideApp, openURL, webSearch, dictate, uiTask, system, none
 
     public static let appTargeted: Set<Action> = [
         .openApp, .closeApp, .switchApp, .minimizeApp, .maximizeApp,
@@ -22,6 +22,8 @@ public enum Action: String, CaseIterable, Codable {
         case .openURL: return "Open a specific website or URL in a browser"
         case .webSearch: return "Search the web for a query"
         case .dictate: return "Type or write text at the cursor"
+        case .uiTask:
+            return "Operate controls inside an application's own window: click or press a button, start or create something, choose a menu item, fill a field, open a link on a page — anything that requires looking at what the app shows"
         case .system: return "A system-level action not aimed at one app (volume, lock, sleep, screenshot, brightness, show desktop)"
         case .none: return "No actionable command"
         }
@@ -68,6 +70,10 @@ public struct Decision {
     public var query: String?
     public var text: String?
     public var percent: Int?
+    public var destructive: Bool
+    /// The request asks Jev to compose wording before typing it; `query` contains the brief.
+    public var composes: Bool
+    public var generatedText: String?
     public var confidence: Double
     public var latencyMs: Double
     public var model: String
@@ -84,6 +90,9 @@ public struct Decision {
         query: String? = nil,
         text: String? = nil,
         percent: Int? = nil,
+        destructive: Bool = false,
+        composes: Bool = false,
+        generatedText: String? = nil,
         confidence: Double = 0,
         latencyMs: Double = 0,
         model: String = ""
@@ -99,12 +108,18 @@ public struct Decision {
         self.query = query
         self.text = text
         self.percent = percent
+        self.destructive = destructive
+        self.composes = composes
+        self.generatedText = generatedText
         self.confidence = confidence
         self.latencyMs = latencyMs
         self.model = model
     }
 
     public var riskTier: RiskTier {
+        if destructive {
+            return .destructive
+        }
         if action == .closeApp {
             return .caution
         }
@@ -129,8 +144,13 @@ public struct Decision {
         case .openURL: return "Open \(url ?? "website")"
         case .webSearch: return "Search for \(query ?? "query")"
         case .dictate:
+            if composes {
+                return "Write \(query ?? "a message") and type it"
+            }
             let value = text ?? "text"
             return "Type “\(value)”"
+        case .uiTask:
+            return "In \(targetApp ?? "the current app"): \(clause)"
         case .system:
             switch systemAction ?? .none {
             case .volumeSet: return "Volume \(percent ?? 50)%"

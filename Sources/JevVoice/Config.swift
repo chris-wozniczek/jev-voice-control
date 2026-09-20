@@ -19,6 +19,10 @@ enum PlannerMode: String, CaseIterable {
     case jev, deepSeek
 }
 
+enum GeneratorSource: String, CaseIterable {
+    case deepSeek, omlx
+}
+
 final class Config: ObservableObject {
     static let shared = Config()
 
@@ -59,6 +63,30 @@ final class Config: ObservableObject {
 	@Published var computerUseEnabled: Bool {
 		didSet { UserDefaults.standard.set(computerUseEnabled, forKey: "computerUseEnabled") }
 	}
+
+    @Published var cdpEnabled: Bool {
+        didSet { UserDefaults.standard.set(cdpEnabled, forKey: "cdpEnabled") }
+    }
+
+    @Published var cdpPort: Int {
+        didSet { UserDefaults.standard.set(cdpPort, forKey: "cdpPort") }
+    }
+
+    @Published var generatorSource: GeneratorSource {
+        didSet { UserDefaults.standard.set(generatorSource.rawValue, forKey: "generatorSource") }
+    }
+
+    @Published var omlxBaseURL: String {
+        didSet { UserDefaults.standard.set(omlxBaseURL, forKey: "omlxBaseURL") }
+    }
+
+    @Published var omlxTextModel: String {
+        didSet { UserDefaults.standard.set(omlxTextModel, forKey: "omlxTextModel") }
+    }
+
+    @Published var previewGeneratedText: Bool {
+        didSet { UserDefaults.standard.set(previewGeneratedText, forKey: "previewGeneratedText") }
+    }
 
     @Published var plannerMode: PlannerMode {
         didSet { UserDefaults.standard.set(plannerMode.rawValue, forKey: "plannerMode") }
@@ -111,6 +139,14 @@ final class Config: ObservableObject {
             ?? ProcessInfo.processInfo.environment["DEEPSEEK_API_KEY"]
             ?? ""
         self.computerUseEnabled = defaults.object(forKey: "computerUseEnabled") as? Bool ?? true
+        self.cdpEnabled = defaults.object(forKey: "cdpEnabled") as? Bool ?? true
+        self.cdpPort = defaults.object(forKey: "cdpPort") as? Int ?? 9222
+        self.generatorSource = GeneratorSource(
+            rawValue: defaults.string(forKey: "generatorSource") ?? ""
+        ) ?? .deepSeek
+        self.omlxBaseURL = defaults.string(forKey: "omlxBaseURL") ?? "http://127.0.0.1:8000"
+        self.omlxTextModel = defaults.string(forKey: "omlxTextModel") ?? ""
+        self.previewGeneratedText = defaults.object(forKey: "previewGeneratedText") as? Bool ?? true
         self.plannerMode = PlannerMode(
             rawValue: defaults.string(forKey: "plannerMode") ?? ""
         ) ?? .jev

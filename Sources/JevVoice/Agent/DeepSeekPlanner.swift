@@ -5,6 +5,24 @@ struct PlannerStepRecord: Equatable {
     let argsSummary: String
     let resultText: String
     let succeeded: Bool
+    let elementRole: String?
+    let elementLabel: String?
+
+    init(
+        tool: String,
+        argsSummary: String,
+        resultText: String,
+        succeeded: Bool,
+        elementRole: String? = nil,
+        elementLabel: String? = nil
+    ) {
+        self.tool = tool
+        self.argsSummary = argsSummary
+        self.resultText = resultText
+        self.succeeded = succeeded
+        self.elementRole = elementRole
+        self.elementLabel = elementLabel
+    }
 }
 
 struct PlannerContext {
@@ -12,6 +30,7 @@ struct PlannerContext {
     var goal: String = ""
     var targetApp: String? = nil
     var windowTitle: String? = nil
+    var generatedText: String? = nil
     var snapshot: CuaSnapshot? = nil
     var history: [PlannerStepRecord] = []
     var stepIndex: Int = 0
@@ -21,6 +40,7 @@ struct PlannerContext {
         goal: String = "",
         targetApp: String? = nil,
         windowTitle: String? = nil,
+        generatedText: String? = nil,
         snapshot: CuaSnapshot? = nil,
         history: [PlannerStepRecord] = [],
         stepIndex: Int = 0
@@ -29,6 +49,7 @@ struct PlannerContext {
         self.goal = goal
         self.targetApp = targetApp
         self.windowTitle = windowTitle
+        self.generatedText = generatedText
         self.snapshot = snapshot
         self.history = history
         self.stepIndex = stepIndex
@@ -132,7 +153,17 @@ final class DeepSeekPlanner: ActionPlanner {
         request.httpMethod = "POST"
         request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        let body = Self.body(messages: context.messages, thinking: thinking)
+        var messages = context.messages
+        if let generatedText = context.generatedText {
+            messages.append(DeepSeekMessage(
+                role: "system",
+                content: .string("The text to type is provided verbatim: \(generatedText). Do not rewrite it."),
+                name: nil,
+                toolCallID: nil,
+                toolCalls: nil
+            ))
+        }
+        let body = Self.body(messages: messages, thinking: thinking)
         request.httpBody = try JSONEncoder().encode(body)
         let (data, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {

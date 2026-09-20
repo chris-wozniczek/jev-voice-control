@@ -51,4 +51,64 @@ final class ExecutionPolicyTests: XCTestCase {
         )
         XCTAssertEqual(decision.riskTier, .caution)
     }
+
+    func testDestructiveDecisionRequiresConfirmation() {
+        let decision = Decision(
+            clause: "submit the order",
+            action: .uiTask,
+            destructive: true,
+            confidence: 0.9
+        )
+        XCTAssertEqual(
+            ExecutionPolicy.verdict(for: [decision], alwaysConfirm: false),
+            .confirm(reason: "This sounds hard to undo — confirm?")
+        )
+    }
+
+    func testLowConfidenceUITaskRunsWithoutConfirmation() {
+        let decision = Decision(
+            clause: "click the new session button",
+            action: .uiTask,
+            confidence: 0.3
+        )
+        XCTAssertEqual(
+            ExecutionPolicy.verdict(for: [decision], alwaysConfirm: false),
+            .run
+        )
+    }
+
+    func testGeneratedTextPreviewsBeforeTyping() {
+        let decision = Decision(
+            clause: "write a note apologising for the delay",
+            action: .dictate,
+            query: "a note apologising for the delay",
+            composes: true,
+            generatedText: "Sorry for the delay — thank you for your patience."
+        )
+        XCTAssertEqual(
+            ExecutionPolicy.verdict(
+                for: [decision],
+                alwaysConfirm: false,
+                previewGeneratedText: true
+            ),
+            .confirm(reason: "Type this? Sorry for the delay — thank you for your patience.")
+        )
+    }
+
+    func testGeneratedTextRunsWithoutPreview() {
+        let decision = Decision(
+            clause: "write a note apologising for the delay",
+            action: .dictate,
+            composes: true,
+            generatedText: "Sorry for the delay."
+        )
+        XCTAssertEqual(
+            ExecutionPolicy.verdict(
+                for: [decision],
+                alwaysConfirm: false,
+                previewGeneratedText: false
+            ),
+            .run
+        )
+    }
 }

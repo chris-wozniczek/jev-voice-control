@@ -10,6 +10,13 @@ public enum LocalCommandParser {
         let trimmed = clause.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
 
+        if let brief = SlotExtractor.composeRequest(from: trimmed) {
+            return Decision(
+                clause: trimmed, action: .dictate, query: brief,
+                composes: true, confidence: 0.9, model: "local"
+            )
+        }
+
         if trimmed.range(
             of: #"^(type|write|dictate|say)\b"#, options: [.regularExpression, .caseInsensitive]
         ) != nil,

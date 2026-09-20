@@ -142,30 +142,19 @@ final class AgentTests: XCTestCase {
     }
 
     @MainActor
-    func testResidualOpenIntentRoutesOnlyWithKey() {
+    func testUITaskDoesNotRouteToAgent() {
         let decision = Decision(
-            clause: "open a new session in devin",
-            action: .openApp,
+            clause: "start a new session",
+            action: .uiTask,
             targetApp: "Devin",
             model: "local"
         )
-        XCTAssertTrue(VoiceController.shouldRoute(
-            transcript: "open a new session in devin",
+        XCTAssertFalse(VoiceController.shouldRoute(
+            transcript: "start a new session",
             decisions: [decision],
             verdict: .run,
             agentAvailable: true,
             enabled: true,
-            installedApps: ["Devin", "Google Chrome"],
-            aliases: AppMatcher.builtInAliases
-        ))
-        XCTAssertFalse(VoiceController.shouldRoute(
-            transcript: "open a new session in devin",
-            decisions: [decision],
-            verdict: .run,
-            agentAvailable: false,
-            enabled: true,
-            installedApps: ["Devin", "Google Chrome"],
-            aliases: AppMatcher.builtInAliases
         ))
     }
 
@@ -201,13 +190,13 @@ final class AgentTests: XCTestCase {
     }
 
     @MainActor
-    func testUnknownOpenIntentRoutesWithKeyButKeepsSuggestionsWithoutKey() {
+    func testUnresolvedOpenIntentDoesNotUseResidualRoutingHeuristic() {
         let decision = Decision(
             clause: "open a new session",
             action: .openApp,
             model: "local"
         )
-        XCTAssertTrue(VoiceController.shouldRoute(
+        XCTAssertFalse(VoiceController.shouldRoute(
             transcript: "open a new session",
             decisions: [decision],
             verdict: .run,
@@ -290,6 +279,28 @@ final class AgentTests: XCTestCase {
             CuaWindow(id: 2, title: "Larger", frame: ["width": 900, "height": 700]),
         ]
         XCTAssertEqual(AgentRunner.pickWindow(windows, preferring: nil), windows[0])
+    }
+
+    @MainActor
+    func testCDPIsPreferredForChromeOrThinAccessibilityTrees() {
+        XCTAssertTrue(AgentRunner.shouldTryCDP(bundleId: "com.google.Chrome", interactiveCount: 20))
+        XCTAssertTrue(AgentRunner.shouldTryCDP(bundleId: "com.example.Electron", interactiveCount: 2))
+        XCTAssertFalse(AgentRunner.shouldTryCDP(bundleId: "com.example.App", interactiveCount: 3))
+    }
+
+    @MainActor
+    func testRiskyCDPTokenUsesSnapshotLabel() {
+        let snapshot = CuaSnapshot(
+            snapshotId: "snapshot",
+            treeMarkdown: "",
+            elements: [
+                CuaElement(token: "cdp:1", role: "AXButton", label: "Delete", value: nil),
+            ],
+            image: nil
+        )
+        AgentRunner.shared.setSnapshotForTesting(snapshot)
+        XCTAssertTrue(AgentRunner.shared.isRisky(token: "cdp:1", key: nil))
+        AgentRunner.shared.setSnapshotForTesting(nil)
     }
 
     @MainActor
