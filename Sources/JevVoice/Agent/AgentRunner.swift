@@ -38,7 +38,9 @@ final class AgentRunner: ObservableObject {
     private var lastPID: Int?
     private var lastApp: CuaApp?
     private var lastWindowID: Int?
+    private var lastWindowFrame: CGRect?
     private var lastSnapshot: CuaSnapshot?
+    private var lastAXEntries: [String: AXEntry] = [:]
     private var lastWindowTitle: String?
     private var lastCDPTitle: String?
     private var lastCDPPort: Int?
@@ -130,7 +132,8 @@ final class AgentRunner: ObservableObject {
         lastPID = nil
         lastApp = nil
         lastWindowID = nil
-        lastSnapshot = nil
+        lastWindowFrame = nil
+        storeSnapshot(nil)
         lastWindowTitle = nil
         lastCDPTitle = nil
         lastCDPPort = nil
@@ -320,7 +323,15 @@ final class AgentRunner: ObservableObject {
     }
 
     func setSnapshotForTesting(_ snapshot: CuaSnapshot?) {
-        lastSnapshot = snapshot
+        storeSnapshot(snapshot)
+    }
+
+    func setAXEntriesForTesting(_ entries: [String: AXEntry]) {
+        lastAXEntries = entries
+    }
+
+    func executeForTesting(_ call: DeepSeekToolCall) async throws -> ToolOutput {
+        try await execute(call)
     }
 
     func apps(forceRefresh: Bool = false) async throws -> [CuaApp] {
@@ -410,7 +421,8 @@ final class AgentRunner: ObservableObject {
             lastApp = nil
             lastPID = nil
             lastWindowID = nil
-            lastSnapshot = nil
+            lastWindowFrame = nil
+            storeSnapshot(nil)
             return try await afterMutation(text)
         case "click":
             guard let token = call.arguments["element_token"]?.stringValue else {
@@ -423,6 +435,25 @@ final class AgentRunner: ObservableObject {
                 }
                 try await CDPBridge.shared.click(port: port, windowTitle: title, token: token)
                 return try await afterMutation("Clicked")
+            }
+            if token.hasPrefix("ax:") {
+                guard let entry = lastAXEntries[token] else {
+                    throw AgentError.api("Observe the window again — that element is stale")
+                }
+                do {
+                    try AXTreeReader.press(entry)
+                } catch {
+                    guard let frame = entry.frame else { throw error }
+                    if let pid = lastPID {
+                        NSRunningApplication(processIdentifier: pid_t(pid))?.activate()
+                        try await Task.sleep(for: .milliseconds(100))
+                    }
+                    CGEventClicker.click(at: CGPoint(
+                        x: frame.midX,
+                        y: frame.midY
+                    ))
+                }
+                return try await afterMutation("Clicked \(entry.label)")
             }
             guard let pid = lastPID else { throw AgentError.api("Observe a window first") }
             do {
@@ -475,6 +506,25 @@ final class AgentRunner: ObservableObject {
                 return try await afterMutation("Typed text")
             }
             guard let pid = lastPID else { throw AgentError.api("Observe a window before typing") }
+            if let token, token.hasPrefix("ax:") {
+                guard let entry = lastAXEntries[token] else {
+                    throw AgentError.api("Observe the window again — that element is stale")
+                }
+                do {
+                    try AXTreeReader.focus(entry)
+                } catch {
+                    Log.agent.info("AX focus failed; typing into current focus error=\(error.localizedDescription, privacy: .public)")
+                }
+                let result = try await measureCua {
+                    try await CuaDriver.shared.type(
+                        pid: pid,
+                        text: text,
+                        token: nil,
+                        windowId: lastWindowID
+                    )
+                }
+                return try await afterMutation(result.text ?? "Typed text")
+            }
             let result = try await measureCua {
                 try await CuaDriver.shared.type(
                     pid: pid,
@@ -570,7 +620,8 @@ final class AgentRunner: ObservableObject {
         guard let firstCandidate = candidates.first else {
             lastPID = app.pid
             lastWindowID = nil
-            lastSnapshot = nil
+            lastWindowFrame = nil
+            storeSnapshot(nil)
             return ToolOutput(
                 text: "Running apps: \(reportedApps.map(\.name).joined(separator: ", ")); \(app.name) has no window.",
                 content: "Running apps: \(reportedApps.map(\.name).joined(separator: ", ")); \(app.name) has no window.",
@@ -578,40 +629,76 @@ final class AgentRunner: ObservableObject {
             )
         }
         let wantsImage = arguments["screenshot"]?.boolValue ?? false
-        let interactiveRoles: Set<String> = [
-            "AXButton", "AXLink", "AXTextField", "AXTextArea", "AXMenuItem",
-            "AXTab", "AXCheckBox", "AXRadioButton", "AXPopUpButton", "AXComboBox",
-            "AXRow", "AXCell",
-        ]
         var firstSnapshot: CuaSnapshot?
+        var firstEntries: [String: AXEntry] = [:]
         var firstSnapshotWindow: CuaWindow?
         var firstError: Error?
         var chosenWindow: CuaWindow?
         var snapshot: CuaSnapshot?
+        var chosenEntries: [String: AXEntry] = [:]
         for candidate in candidates {
             do {
+                var candidateSnapshot: CuaSnapshot
+                var candidateEntries: [String: AXEntry] = [:]
                 let treeStarted = Date()
-                let candidateSnapshot = try await CuaDriver.shared.windowState(
-                    pid: app.pid,
-                    windowId: candidate.id,
-                    includeImage: wantsImage && Permission.screenRecording.isGranted
-                )
-                let treeElapsed = Date().timeIntervalSince(treeStarted)
-                cuaSeconds += treeElapsed
-                Log.agent.info("stage=tree elapsed=\(treeElapsed)")
+                let candidateFrame = Self.cgRect(candidate.frame)
+                let nativeSnapshot = Config.shared.nativeAXEnabled
+                    ? await Task.detached(priority: .userInitiated) {
+                        AXTreeReader.snapshot(
+                            pid: app.pid,
+                            windowFrame: candidateFrame
+                        )
+                    }.value
+                    : nil
+                if let ax = nativeSnapshot {
+                    let axElapsed = Date().timeIntervalSince(treeStarted)
+                    Log.agent.info(
+                        "stage=axtree elements=\(ax.snapshot.elements.count) interactive=\(ax.snapshot.elements.filter { AXTreeReader.interactiveRoles.contains($0.role) }.count) elapsed=\(axElapsed)"
+                    )
+                    candidateSnapshot = ax.snapshot
+                    candidateEntries = ax.entries
+                    if wantsImage && Permission.screenRecording.isGranted {
+                        let imageStarted = Date()
+                        let imageSnapshot = try await CuaDriver.shared.windowState(
+                            pid: app.pid,
+                            windowId: candidate.id,
+                            includeImage: true
+                        )
+                        cuaSeconds += Date().timeIntervalSince(imageStarted)
+                        Log.agent.info("stage=tree elapsed=\(Date().timeIntervalSince(imageStarted))")
+                        candidateSnapshot = CuaSnapshot(
+                            snapshotId: candidateSnapshot.snapshotId,
+                            treeMarkdown: candidateSnapshot.treeMarkdown,
+                            elements: candidateSnapshot.elements,
+                            image: imageSnapshot.image
+                        )
+                    }
+                } else {
+                    let treeStarted = Date()
+                    candidateSnapshot = try await CuaDriver.shared.windowState(
+                        pid: app.pid,
+                        windowId: candidate.id,
+                        includeImage: wantsImage && Permission.screenRecording.isGranted
+                    )
+                    let treeElapsed = Date().timeIntervalSince(treeStarted)
+                    cuaSeconds += treeElapsed
+                    Log.agent.info("stage=tree elapsed=\(treeElapsed)")
+                }
                 let interactive = candidateSnapshot.elements.contains {
-                    interactiveRoles.contains($0.role)
+                    AXTreeReader.interactiveRoles.contains($0.role)
                 }
                 Log.cua.info(
                     "window candidate id=\(candidate.id) title=\(candidate.title, privacy: .public) elements=\(candidateSnapshot.elements.count) interactive=\(interactive)"
                 )
                 if firstSnapshot == nil {
                     firstSnapshot = candidateSnapshot
+                    firstEntries = candidateEntries
                     firstSnapshotWindow = candidate
                 }
                 if interactive {
                     chosenWindow = candidate
                     snapshot = candidateSnapshot
+                    chosenEntries = candidateEntries
                     break
                 }
             } catch {
@@ -630,7 +717,8 @@ final class AgentRunner: ObservableObject {
             window: window,
             includeImage: wantsImage,
             reportedApps: reportedApps,
-            snapshot: selectedSnapshot
+            snapshot: selectedSnapshot,
+            axEntries: chosenWindow == nil ? firstEntries : chosenEntries
         )
     }
 
@@ -639,24 +727,61 @@ final class AgentRunner: ObservableObject {
         window: CuaWindow,
         includeImage: Bool,
         reportedApps: [CuaApp],
-        snapshot: CuaSnapshot?
+        snapshot: CuaSnapshot?,
+        axEntries: [String: AXEntry]
     ) async throws -> ToolOutput {
         Log.cua.info(
             "chosen window title=\(window.title, privacy: .public) app=\(app.name, privacy: .public)"
         )
-        let resolvedSnapshot: CuaSnapshot
+        var resolvedSnapshot: CuaSnapshot
+        var resolvedAXEntries = axEntries
         if let providedSnapshot = snapshot {
             resolvedSnapshot = providedSnapshot
         } else {
             let treeStarted = Date()
-            resolvedSnapshot = try await CuaDriver.shared.windowState(
-                pid: app.pid,
-                windowId: window.id,
-                includeImage: includeImage && Permission.screenRecording.isGranted
-            )
-            let treeElapsed = Date().timeIntervalSince(treeStarted)
-            cuaSeconds += treeElapsed
-            Log.agent.info("stage=tree elapsed=\(treeElapsed)")
+            let nativeWindowFrame = lastWindowFrame ?? Self.cgRect(window.frame)
+            let nativeSnapshot = Config.shared.nativeAXEnabled
+                ? await Task.detached(priority: .userInitiated) {
+                    AXTreeReader.snapshot(
+                        pid: app.pid,
+                        windowFrame: nativeWindowFrame
+                    )
+                }.value
+                : nil
+            if let ax = nativeSnapshot {
+                let axElapsed = Date().timeIntervalSince(treeStarted)
+                Log.agent.info(
+                    "stage=axtree elements=\(ax.snapshot.elements.count) interactive=\(ax.snapshot.elements.filter { AXTreeReader.interactiveRoles.contains($0.role) }.count) elapsed=\(axElapsed)"
+                )
+                resolvedSnapshot = ax.snapshot
+                resolvedAXEntries = ax.entries
+                if includeImage && Permission.screenRecording.isGranted {
+                    let imageStarted = Date()
+                    let imageSnapshot = try await CuaDriver.shared.windowState(
+                        pid: app.pid,
+                        windowId: window.id,
+                        includeImage: true
+                    )
+                    cuaSeconds += Date().timeIntervalSince(imageStarted)
+                    Log.agent.info("stage=tree elapsed=\(Date().timeIntervalSince(imageStarted))")
+                    resolvedSnapshot = CuaSnapshot(
+                        snapshotId: resolvedSnapshot.snapshotId,
+                        treeMarkdown: resolvedSnapshot.treeMarkdown,
+                        elements: resolvedSnapshot.elements,
+                        image: imageSnapshot.image
+                    )
+                }
+            } else {
+                let treeStarted = Date()
+                resolvedSnapshot = try await CuaDriver.shared.windowState(
+                    pid: app.pid,
+                    windowId: window.id,
+                    includeImage: includeImage && Permission.screenRecording.isGranted
+                )
+                let treeElapsed = Date().timeIntervalSince(treeStarted)
+                cuaSeconds += treeElapsed
+                Log.agent.info("stage=tree elapsed=\(treeElapsed)")
+            }
         }
         lastCDPTitle = nil
         lastCDPPort = nil
@@ -704,8 +829,11 @@ final class AgentRunner: ObservableObject {
         lastApp = app
         lastPID = app.pid
         lastWindowID = window.id
+        if let frame = Self.cgRect(window.frame) {
+            lastWindowFrame = frame
+        }
         lastWindowTitle = window.title
-        lastSnapshot = mergedSnapshot
+        storeSnapshot(mergedSnapshot, axEntries: resolvedAXEntries)
         let extra = includeImage && !Permission.screenRecording.isGranted
             ? " Screenshot unavailable: allow Screen Recording and proceed with AX only."
             : ""
@@ -740,6 +868,25 @@ final class AgentRunner: ObservableObject {
     static func shouldRetryAfterActivate(_ error: Error) -> Bool {
         let description = error.localizedDescription
         return description.contains("-25206") || description.localizedCaseInsensitiveContains("AXPress")
+    }
+
+    private func storeSnapshot(
+        _ snapshot: CuaSnapshot?,
+        axEntries: [String: AXEntry] = [:]
+    ) {
+        lastSnapshot = snapshot
+        lastAXEntries = snapshot == nil ? [:] : axEntries
+    }
+
+    private static func cgRect(_ frame: [String: Double]?) -> CGRect? {
+        guard let frame,
+              let x = frame["x"],
+              let y = frame["y"],
+              let width = frame["width"],
+              let height = frame["height"] else {
+            return nil
+        }
+        return CGRect(x: x, y: y, width: width, height: height)
     }
 
     static func rankWindows(
@@ -794,6 +941,7 @@ final class AgentRunner: ObservableObject {
         let observation: ToolOutput
         if let app = lastApp, let windowID = lastWindowID {
             do {
+                try await Task.sleep(for: .milliseconds(150))
                 observation = try await observeWindow(
                     app: app,
                     window: CuaWindow(
@@ -803,7 +951,8 @@ final class AgentRunner: ObservableObject {
                     ),
                     includeImage: false,
                     reportedApps: cachedApps ?? [app],
-                    snapshot: nil
+                    snapshot: nil,
+                    axEntries: [:]
                 )
             } catch {
                 observation = try await observe([:])

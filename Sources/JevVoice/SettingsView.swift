@@ -100,6 +100,12 @@ struct SettingsView: View {
                             Toggle("App shortcuts (app-actions.json)", isOn: $config.appActionsEnabled)
                                 .toggleStyle(.switch)
                                 .controlSize(.small)
+                            Toggle("Native Accessibility (in-process)", isOn: $config.nativeAXEnabled)
+                                .toggleStyle(.switch)
+                                .controlSize(.small)
+                            Text("Reads the window's Accessibility tree directly; Cua is used when it's too thin.")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
                             HStack {
                                 Text("\(appActionCount) actions loaded")
                                     .font(.caption2)

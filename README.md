@@ -170,6 +170,10 @@ an optional `bundleId`, a display `name`, matching `phrases`, and key steps:
 Disable or edit these shortcuts in Settings. Everything still works through
 the generic observe → Jev → act → verify loop without this file.
 
+Native Accessibility can read the target window's tree in-process for lower
+latency and uses Cua when the tree is too thin. Disable it in Computer use
+settings to use the Cua observer exclusively.
+
 ## Debugging
 
 Inspect recent Jev Voice logs with:
