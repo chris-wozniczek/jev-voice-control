@@ -124,7 +124,51 @@ final class AppActionsTests: XCTestCase {
     }
 
     func testBundledActionsDecode() {
-        XCTAssertGreaterThanOrEqual(AppActionRegistry.shared.actions.count, 5)
+        XCTAssertGreaterThanOrEqual(AppActionRegistry.shared.actions.count, 6)
+    }
+
+    func testSiteActionRequiresMatchingWindowOrURL() {
+        let registry = AppActionRegistry(
+            bundledActions: [
+                AppAction(
+                    app: "*",
+                    site: "x.com",
+                    name: "compose post",
+                    phrases: ["compose a post"],
+                    steps: [.key(key: "n", modifiers: [])]
+                ),
+            ],
+            userActions: []
+        )
+        XCTAssertNil(registry.match(
+            goal: "compose a post",
+            appName: "Google Chrome",
+            bundleId: nil,
+            windowTitle: "GitHub",
+            url: "https://github.com"
+        ))
+        XCTAssertNotNil(registry.match(
+            goal: "compose a post",
+            appName: "Google Chrome",
+            bundleId: nil,
+            windowTitle: "Home / X",
+            url: "https://x.com/home"
+        ))
+        XCTAssertNil(registry.match(
+            goal: "compose a post about cats",
+            appName: "Google Chrome",
+            bundleId: nil,
+            windowTitle: "Home / X",
+            url: "https://x.com/home"
+        ))
+        XCTAssertEqual(
+            registry.match(
+                goal: "new tab",
+                appName: "Safari",
+                bundleId: nil
+            ),
+            nil
+        )
     }
 
     @MainActor

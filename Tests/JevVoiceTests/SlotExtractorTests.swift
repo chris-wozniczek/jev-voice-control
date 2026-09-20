@@ -67,6 +67,15 @@ final class SlotExtractorTests: XCTestCase {
         XCTAssertNil(SlotExtractor.composeRequest(from: "type hello there"))
         XCTAssertNil(SlotExtractor.composeRequest(from: "write a message saying hello"))
         XCTAssertNotNil(SlotExtractor.composeRequest(from: "reply with a polite thank you message"))
+        XCTAssertEqual(
+            SlotExtractor.composeRequest(from: "compose a post about the new release"),
+            "a post about the new release"
+        )
+        XCTAssertEqual(
+            SlotExtractor.composeRequest(from: "post on x about the new release"),
+            "about the new release"
+        )
+        XCTAssertNil(SlotExtractor.composeRequest(from: "compose a post saying 'hello'"))
     }
 
     func testPercentDigits() {

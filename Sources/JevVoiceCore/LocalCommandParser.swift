@@ -5,14 +5,20 @@ public enum LocalCommandParser {
         clause: String,
         installedApps: [String],
         aliases: [String: String],
-        frontmostApp: String?
+        frontmostApp: String?,
+        siteResolver: SiteResolver = SiteResolver(sites: SiteResolver.defaultSites),
+        defaultBrowser: String = "Google Chrome"
     ) -> Decision? {
         let trimmed = clause.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
 
         if let brief = SlotExtractor.composeRequest(from: trimmed) {
+            let site = siteResolver.site(in: trimmed, installedApps: installedApps)
             return Decision(
-                clause: trimmed, action: .dictate, query: brief,
+                clause: trimmed, action: .dictate,
+                targetApp: site == nil ? nil : SlotExtractor.searchBrowser(from: trimmed) ?? defaultBrowser,
+                siteHost: site?.host,
+                query: brief,
                 composes: true, confidence: 0.9, model: "local"
             )
         }

@@ -2,10 +2,27 @@ import Foundation
 
 struct AppAction: Codable, Equatable {
     var app: String
+    var site: String?
     var bundleId: String?
     var name: String
     var phrases: [String]
     var steps: [AppActionStep]
+
+    init(
+        app: String,
+        site: String? = nil,
+        bundleId: String? = nil,
+        name: String,
+        phrases: [String],
+        steps: [AppActionStep]
+    ) {
+        self.app = app
+        self.site = site
+        self.bundleId = bundleId
+        self.name = name
+        self.phrases = phrases
+        self.steps = steps
+    }
 }
 
 enum AppActionStep: Codable, Equatable {
@@ -70,7 +87,13 @@ final class AppActionRegistry {
         actions = Self.merged(bundled: bundled, user: user)
     }
 
-    func match(goal: String, appName: String?, bundleId: String?) -> AppAction? {
+    func match(
+        goal: String,
+        appName: String?,
+        bundleId: String?,
+        windowTitle: String? = nil,
+        url: String? = nil
+    ) -> AppAction? {
         let normalizedGoal = Self.normalize(goal)
         guard !normalizedGoal.isEmpty else { return nil }
         let specific = actions.filter { action in
@@ -82,12 +105,16 @@ final class AppActionRegistry {
         }
         let wildcard = actions.filter { $0.app == "*" }
         func validAction(_ action: AppAction) -> Bool {
+            guard Self.matchesSite(action, windowTitle: windowTitle, url: url) else {
+                return false
+            }
             guard let phrase = Self.matchedPhrase(in: normalizedGoal, action: action) else {
                 return false
             }
             return Self.hasOnlyShortcutIntent(
                 normalizedGoal,
-                removing: phrase
+                removing: phrase,
+                action: action
             )
         }
         if let action = specific.filter(validAction).max(by: {
@@ -100,6 +127,16 @@ final class AppActionRegistry {
             Self.longestMatchingPhrase(in: normalizedGoal, action: lhs)
                 < Self.longestMatchingPhrase(in: normalizedGoal, action: rhs)
         }
+    }
+
+    private static func matchesSite(
+        _ action: AppAction,
+        windowTitle: String?,
+        url: String?
+    ) -> Bool {
+        guard let site = action.site?.lowercased(), !site.isEmpty else { return true }
+        return [windowTitle, url].compactMap { $0?.lowercased() }
+            .contains { $0.contains(site) }
     }
 
     func ensureUserFileExists() {
@@ -210,7 +247,8 @@ final class AppActionRegistry {
 
     private static func hasOnlyShortcutIntent(
         _ goal: String,
-        removing phrase: String
+        removing phrase: String,
+        action: AppAction
     ) -> Bool {
         var remaining = goal
         remaining = remaining.replacingOccurrences(
@@ -231,7 +269,7 @@ final class AppActionRegistry {
         let extraWords = remaining.split(separator: " ").map(String.init).filter {
             !stopWords.contains($0)
         }
-        return extraWords.count < 3
+        return action.site == nil ? extraWords.count < 3 : extraWords.isEmpty
     }
 
     private static func containsWordBounded(_ goal: String, phrase: String) -> Bool {

@@ -4,6 +4,8 @@ public final class CommandInterpreter {
     private let client: JevClient
     private let installedApps: [String]
     private let aliases: [String: String]
+    private let siteResolver: SiteResolver
+    private let defaultBrowser: String
 
     private static let browserNames: Set<String> = [
         "safari", "google chrome", "chrome", "firefox", "arc", "brave browser",
@@ -20,11 +22,15 @@ public final class CommandInterpreter {
     public init(
         client: JevClient,
         installedApps: [String],
-        aliases: [String: String] = [:]
+        aliases: [String: String] = [:],
+        siteResolver: SiteResolver = SiteResolver(sites: SiteResolver.defaultSites),
+        defaultBrowser: String = "Google Chrome"
     ) {
         self.client = client
         self.installedApps = installedApps
         self.aliases = aliases
+        self.siteResolver = siteResolver
+        self.defaultBrowser = defaultBrowser
     }
 
     struct State: Encodable {
@@ -114,7 +120,9 @@ public final class CommandInterpreter {
                         clause: clause,
                         installedApps: self.installedApps,
                         aliases: self.aliases,
-                        frontmostApp: frontmostApp
+                        frontmostApp: frontmostApp,
+                        siteResolver: self.siteResolver,
+                        defaultBrowser: self.defaultBrowser
                     ) {
                         return (index, local)
                     }
@@ -134,13 +142,17 @@ public final class CommandInterpreter {
         clause: String,
         installedApps: [String],
         aliases: [String: String],
-        frontmostApp: String?
+        frontmostApp: String?,
+        siteResolver: SiteResolver = SiteResolver(sites: SiteResolver.defaultSites),
+        defaultBrowser: String = "Google Chrome"
     ) -> [Decision]? {
         guard let local = LocalCommandParser.parse(
             clause: clause,
             installedApps: installedApps,
             aliases: aliases,
-            frontmostApp: frontmostApp
+            frontmostApp: frontmostApp,
+            siteResolver: siteResolver,
+            defaultBrowser: defaultBrowser
         ) else {
             return nil
         }
@@ -166,6 +178,7 @@ public final class CommandInterpreter {
             action: local.action,
             actionProbabilities: local.actionProbabilities,
             targetApp: local.targetApp,
+            siteHost: local.siteHost,
             spokenTarget: local.spokenTarget,
             targetAppProbabilities: local.targetAppProbabilities,
             systemAction: local.systemAction,
@@ -340,6 +353,12 @@ public final class CommandInterpreter {
             query = brief
             text = nil
         }
+        let site = siteResolver.site(in: clause, installedApps: installedApps)
+        var siteHost: String?
+        if let site, action == .uiTask || (action == .dictate && composes) {
+            siteHost = site.host
+            targetApp = SlotExtractor.searchBrowser(from: clause) ?? defaultBrowser
+        }
 
         let destructive: Bool
         if case .noul(let probability) = response.answers["destructive"] {
@@ -356,6 +375,7 @@ public final class CommandInterpreter {
             action: action,
             actionProbabilities: actionProbs,
             targetApp: targetApp,
+            siteHost: siteHost,
             spokenTarget: AppMatcher.spokenTarget(from: clause),
             targetAppProbabilities: targetProbs,
             systemAction: systemAction,

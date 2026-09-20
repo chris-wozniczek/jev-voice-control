@@ -112,6 +112,7 @@ final class JevStepPlanner: ActionPlanner {
         let state: JSONValue = .object([
             "goal": .string(ctx.goal),
             "app": ctx.targetApp.map(JSONValue.string) ?? .null,
+            "site": ctx.siteHost.map(JSONValue.string) ?? .null,
             "window_title": ctx.windowTitle.map(JSONValue.string) ?? .null,
             "previous_window_title": ctx.previousWindowTitle.map(JSONValue.string) ?? .null,
             "step": .number(Double(ctx.stepIndex)),
@@ -155,7 +156,7 @@ final class JevStepPlanner: ActionPlanner {
         criteria["done"] = "The goal is already complete"
         criteria["stuck"] = "No listed element can advance the goal"
         let instructions = """
-        The user said `\(ctx.goal)`. `elements` lists the controls currently visible in `\(ctx.targetApp ?? "the app")`; `previous_actions` are the steps already taken. Pick the single next action that moves the goal forward now. Pick `done` only if `elements` and `window_title` already show that the goal is completed. Pick `stuck` if no listed element can advance the goal.
+        The user said `\(ctx.goal)`. `elements` lists the controls currently visible in `\(ctx.targetApp ?? "the app")`; `previous_actions` are the steps already taken. \(ctx.siteHost.map { "The requested site is \($0). " } ?? "")Pick the single next action that moves the goal forward now. Pick `done` only if `elements` and `window_title` already show that the goal is completed. Pick `stuck` if no listed element can advance the goal.
         """
         let questions: [String: Question] = [
             "next_action": .choice(instructions: instructions, criteria: criteria),

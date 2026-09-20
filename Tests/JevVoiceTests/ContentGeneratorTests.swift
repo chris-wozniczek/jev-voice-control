@@ -28,6 +28,24 @@ final class ContentGeneratorTests: XCTestCase {
         XCTAssertNil(body["thinking"])
     }
 
+    func testXBodyIncludesSiteConstraints() {
+        let body = OpenAICompatibleGenerator.body(
+            brief: "about the new release",
+            context: ComposeContext(
+                app: "Google Chrome",
+                windowTitle: "X",
+                siteHost: "x.com"
+            ),
+            model: "local-model",
+            endpoint: URL(string: "http://127.0.0.1:8000/v1/chat/completions")!,
+            thinking: nil
+        )
+        let system = body["messages"]?.arrayValue?.first?["content"]?.stringValue ?? ""
+        XCTAssertTrue(system.contains("280"))
+        XCTAssertTrue(system.contains("No hashtags unless asked"))
+        XCTAssertTrue(system.contains("x.com"))
+    }
+
     func testRequestHeadersOnlyAuthorizeWhenKeyExists() {
         XCTAssertNil(OpenAICompatibleGenerator.requestHeaders(apiKey: nil)["Authorization"])
         XCTAssertNil(OpenAICompatibleGenerator.requestHeaders(apiKey: "")["Authorization"])

@@ -84,6 +84,10 @@ final class Config: ObservableObject {
         didSet { UserDefaults.standard.set(cdpPort, forKey: "cdpPort") }
     }
 
+    @Published var defaultBrowser: String {
+        didSet { UserDefaults.standard.set(defaultBrowser, forKey: "defaultBrowser") }
+    }
+
     @Published var generatorSource: GeneratorSource {
         didSet { UserDefaults.standard.set(generatorSource.rawValue, forKey: "generatorSource") }
     }
@@ -160,6 +164,7 @@ final class Config: ObservableObject {
         self.ocrFallbackEnabled = defaults.object(forKey: "ocrFallbackEnabled") as? Bool ?? true
         self.cdpEnabled = defaults.object(forKey: "cdpEnabled") as? Bool ?? true
         self.cdpPort = defaults.object(forKey: "cdpPort") as? Int ?? 9222
+        self.defaultBrowser = defaults.string(forKey: "defaultBrowser") ?? "Google Chrome"
         self.generatorSource = GeneratorSource(
             rawValue: defaults.string(forKey: "generatorSource") ?? ""
         ) ?? .deepSeek

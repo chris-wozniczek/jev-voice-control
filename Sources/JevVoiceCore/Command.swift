@@ -63,6 +63,7 @@ public struct Decision {
     public var action: Action
     public var actionProbabilities: [String: Double]
     public var targetApp: String?
+    public var siteHost: String?
     public var spokenTarget: String?
     public var targetAppProbabilities: [String: Double]
     public var systemAction: SystemAction?
@@ -83,6 +84,7 @@ public struct Decision {
         action: Action,
         actionProbabilities: [String: Double] = [:],
         targetApp: String? = nil,
+        siteHost: String? = nil,
         spokenTarget: String? = nil,
         targetAppProbabilities: [String: Double] = [:],
         systemAction: SystemAction? = nil,
@@ -101,6 +103,7 @@ public struct Decision {
         self.action = action
         self.actionProbabilities = actionProbabilities
         self.targetApp = targetApp
+        self.siteHost = siteHost
         self.spokenTarget = spokenTarget
         self.targetAppProbabilities = targetAppProbabilities
         self.systemAction = systemAction

@@ -72,6 +72,20 @@ is used by default, or a local oMLX OpenAI-compatible endpoint can be selected
 in Computer use settings. Jev classifies the request; it does not generate
 the prose. Generated text is previewed before typing by default.
 
+### Web workflows
+
+Sites are resolved from the bundled `web-sites.json` registry, with optional
+user overrides at `~/Library/Application Support/Jev Voice/web-sites.json`.
+Choose the default browser in Settings › Computer use; a browser named in the
+command overrides it. Site workflows open the requested host before the
+generic computer-use loop starts.
+
+Requests such as “compose a post on X about the new release” generate wording
+for the requested site, open X, and continue through the normal observe,
+choose, type, and verify flow. The bundled x.com shortcut can press `n` once
+to open the composer when no text field is visible. Post, Send, Publish, Tweet,
+and Reply controls require confirmation before submission.
+
 ```
 microphone ──> SFSpeechRecognizer (on-device) ──> transcript
                                                       │
