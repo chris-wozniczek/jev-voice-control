@@ -344,6 +344,11 @@ final class AgentRunner: ObservableObject {
                   let y = number(call.arguments["y"]) else {
                 throw AgentError.api("Observe a window before clicking coordinates")
             }
+            guard Permission.screenRecording.isGranted else {
+                throw AgentError.api(
+                    "Screen Recording is not allowed, so coordinate clicks are unavailable — allow it in System Settings › Privacy & Security"
+                )
+            }
             try await confirmIfRisky(tool: "click_at", token: nil, key: nil)
             let result = try await CuaDriver.shared.click(pid: pid, windowId: window, x: x, y: y)
             return try await afterMutation(result.text ?? "Clicked")
@@ -366,14 +371,27 @@ final class AgentRunner: ObservableObject {
                 return try await afterMutation("Typed text")
             }
             guard let pid = lastPID else { throw AgentError.api("Observe a window before typing") }
-            let result = try await CuaDriver.shared.type(pid: pid, text: text, token: token)
+            let result = try await CuaDriver.shared.type(
+                pid: pid,
+                text: text,
+                token: token,
+                windowId: token == nil ? lastWindowID : nil
+            )
             return try await afterMutation(result.text ?? "Typed text")
         case "press_key":
             guard let key = call.arguments["key"]?.stringValue,
-                  let pid = lastPID else { throw AgentError.api("Observe a window before pressing keys") }
+                  let pid = lastPID,
+                  let window = lastWindowID else {
+                throw AgentError.api("Observe a window before pressing keys")
+            }
             let modifiers = call.arguments["modifiers"]?.arrayValue?.compactMap(\.stringValue) ?? []
             try await confirmIfRisky(tool: "press_key", token: nil, key: key)
-            let result = try await CuaDriver.shared.pressKey(pid: pid, key: key, modifiers: modifiers)
+            let result = try await CuaDriver.shared.pressKey(
+                pid: pid,
+                key: key,
+                modifiers: modifiers,
+                windowId: window
+            )
             return try await afterMutation(result.text ?? "Pressed \(key)")
         case "wait":
             let seconds = min(3, max(0, number(call.arguments["seconds"]) ?? 0.5))
@@ -425,7 +443,13 @@ final class AgentRunner: ObservableObject {
         targetApp = app.name
         let windows = try await CuaDriver.shared.windows(pid: app.pid)
         let preferredWindowID = app.pid == lastPID ? lastWindowID : nil
-        guard let window = Self.pickWindow(windows, preferring: preferredWindowID) else {
+        let focusedFrame = AXWindowLocator.focusedWindowFrame(pid: pid_t(app.pid))
+        let candidates = Self.rankWindows(
+            windows,
+            preferring: preferredWindowID,
+            focusedFrame: focusedFrame
+        ).prefix(3)
+        guard let firstCandidate = candidates.first else {
             lastPID = app.pid
             lastWindowID = nil
             lastSnapshot = nil
@@ -435,15 +459,53 @@ final class AgentRunner: ObservableObject {
                 image: nil
             )
         }
-        Log.cua.info(
-            "chosen window title=\(window.title, privacy: .public) app=\(app.name, privacy: .public)"
-        )
         let wantsImage = arguments["screenshot"]?.boolValue ?? false
         let includeImage = wantsImage || windows.count < 3
-        let snapshot = try await CuaDriver.shared.windowState(
-            pid: app.pid,
-            windowId: window.id,
-            includeImage: includeImage && Permission.screenRecording.isGranted
+        let interactiveRoles: Set<String> = [
+            "AXButton", "AXLink", "AXTextField", "AXTextArea", "AXMenuItem",
+            "AXTab", "AXCheckBox", "AXRadioButton", "AXPopUpButton", "AXComboBox",
+            "AXRow", "AXCell",
+        ]
+        var firstSnapshot: CuaSnapshot?
+        var firstSnapshotWindow: CuaWindow?
+        var firstError: Error?
+        var chosenWindow: CuaWindow?
+        var snapshot: CuaSnapshot?
+        for candidate in candidates {
+            do {
+                let candidateSnapshot = try await CuaDriver.shared.windowState(
+                    pid: app.pid,
+                    windowId: candidate.id,
+                    includeImage: includeImage && Permission.screenRecording.isGranted
+                )
+                let interactive = candidateSnapshot.elements.contains {
+                    interactiveRoles.contains($0.role)
+                }
+                Log.cua.info(
+                    "window candidate id=\(candidate.id) title=\(candidate.title, privacy: .public) elements=\(candidateSnapshot.elements.count) interactive=\(interactive)"
+                )
+                if firstSnapshot == nil {
+                    firstSnapshot = candidateSnapshot
+                    firstSnapshotWindow = candidate
+                }
+                if interactive {
+                    chosenWindow = candidate
+                    snapshot = candidateSnapshot
+                    break
+                }
+            } catch {
+                if firstSnapshot == nil { firstError = error }
+                Log.cua.info(
+                    "window candidate id=\(candidate.id) title=\(candidate.title, privacy: .public) elements=0 interactive=false error=\(error.localizedDescription, privacy: .public)"
+                )
+            }
+        }
+        let window = chosenWindow ?? firstSnapshotWindow ?? firstCandidate
+        guard let snapshot = snapshot ?? firstSnapshot else {
+            throw firstError ?? CuaDriverError.malformedResponse
+        }
+        Log.cua.info(
+            "chosen window title=\(window.title, privacy: .public) app=\(app.name, privacy: .public)"
         )
         lastCDPTitle = nil
         lastCDPPort = nil
@@ -485,11 +547,6 @@ final class AgentRunner: ObservableObject {
         let extra = includeImage && !Permission.screenRecording.isGranted
             ? " Screenshot unavailable: allow Screen Recording and proceed with AX only."
             : ""
-        let interactiveRoles: Set<String> = [
-            "AXButton", "AXLink", "AXTextField", "AXTextArea", "AXMenuItem",
-            "AXTab", "AXCheckBox", "AXRadioButton", "AXPopUpButton", "AXComboBox",
-            "AXRow", "AXCell",
-        ]
         let hasRoleData = mergedSnapshot.elements.contains { !$0.role.isEmpty }
         let treeSource: String
         if hasRoleData {
@@ -518,20 +575,48 @@ final class AgentRunner: ObservableObject {
         bundleId?.hasPrefix("com.google.Chrome") == true || interactiveCount < 3
     }
 
-    static func pickWindow(_ windows: [CuaWindow], preferring lastWindowID: Int?) -> CuaWindow? {
-        if let lastWindowID,
-           let previous = windows.first(where: { $0.id == lastWindowID }) {
-            return previous
+    static func rankWindows(
+        _ windows: [CuaWindow],
+        preferring lastWindowID: Int?,
+        focusedFrame: CGRect?
+    ) -> [CuaWindow] {
+        var ranked: [CuaWindow] = []
+        var seen = Set<Int>()
+        func append(_ candidates: [CuaWindow]) {
+            for candidate in candidates where seen.insert(candidate.id).inserted {
+                ranked.append(candidate)
+            }
         }
-        guard let qualifying = windows.first(where: { window in
+
+        if let lastWindowID {
+            append(windows.filter { $0.id == lastWindowID })
+        }
+        if let focusedFrame {
+            append(windows.filter { window in
+                guard let frame = window.frame else { return false }
+                return abs((frame["x"] ?? 0) - focusedFrame.origin.x) <= 4
+                    && abs((frame["y"] ?? 0) - focusedFrame.origin.y) <= 4
+                    && abs((frame["width"] ?? 0) - focusedFrame.size.width) <= 4
+                    && abs((frame["height"] ?? 0) - focusedFrame.size.height) <= 4
+            })
+        }
+        let qualifying = windows.filter { window in
             guard let frame = window.frame else { return false }
             return (frame["width"] ?? 0) >= 200
                 && (frame["height"] ?? 0) >= 150
-                && !window.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        }) else {
-            return windows.first
         }
-        return qualifying
+        append(qualifying.filter {
+            !$0.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        })
+        append(qualifying.filter {
+            $0.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        })
+        append(windows)
+        return ranked
+    }
+
+    static func pickWindow(_ windows: [CuaWindow], preferring lastWindowID: Int?) -> CuaWindow? {
+        rankWindows(windows, preferring: lastWindowID, focusedFrame: nil).first
     }
 
     private func afterMutation(_ text: String) async throws -> ToolOutput {

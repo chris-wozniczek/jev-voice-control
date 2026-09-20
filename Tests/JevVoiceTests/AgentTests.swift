@@ -255,12 +255,56 @@ final class AgentTests: XCTestCase {
     }
 
     @MainActor
-    func testAgentFallsBackToFirstUntitledWindow() {
+    func testRankWindowsAllUntitledSkipsTinyHelper() {
         let windows = [
-            CuaWindow(id: 1, title: "", frame: ["width": 800, "height": 600]),
+            CuaWindow(id: 1, title: "", frame: ["width": 1, "height": 1]),
             CuaWindow(id: 2, title: "", frame: ["width": 900, "height": 700]),
         ]
-        XCTAssertEqual(AgentRunner.pickWindow(windows, preferring: nil), windows[0])
+        XCTAssertEqual(
+            AgentRunner.rankWindows(windows, preferring: nil, focusedFrame: nil).first,
+            windows[1]
+        )
+    }
+
+    @MainActor
+    func testRankWindowsPrefersLastWindow() {
+        let windows = [
+            CuaWindow(id: 1, title: "First", frame: ["width": 800, "height": 600]),
+            CuaWindow(id: 2, title: "Previously selected", frame: ["width": 900, "height": 700]),
+        ]
+        XCTAssertEqual(
+            AgentRunner.rankWindows(windows, preferring: 2, focusedFrame: nil).first,
+            windows[1]
+        )
+    }
+
+    @MainActor
+    func testRankWindowsMatchesFocusedFrame() {
+        let windows = [
+            CuaWindow(id: 1, title: "", frame: ["width": 1, "height": 1]),
+            CuaWindow(id: 2, title: "", frame: ["x": 0, "y": 25, "width": 1200, "height": 800]),
+            CuaWindow(id: 3, title: "", frame: ["width": 400, "height": 300]),
+        ]
+        XCTAssertEqual(
+            AgentRunner.rankWindows(
+                windows,
+                preferring: nil,
+                focusedFrame: CGRect(x: 0, y: 25, width: 1200, height: 800)
+            ).first?.id,
+            2
+        )
+    }
+
+    @MainActor
+    func testRankWindowsTitledBeforeUntitledAmongQualifying() {
+        let windows = [
+            CuaWindow(id: 1, title: "", frame: ["width": 800, "height": 600]),
+            CuaWindow(id: 2, title: "Main", frame: ["width": 800, "height": 600]),
+        ]
+        XCTAssertEqual(
+            AgentRunner.rankWindows(windows, preferring: nil, focusedFrame: nil).first,
+            windows[1]
+        )
     }
 
     @MainActor

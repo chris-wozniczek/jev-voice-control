@@ -23,6 +23,7 @@ final class VoiceController: ObservableObject {
     @Published var speechStatusMessage: String?
     @Published var suggestions: [String] = []
     @Published var suggestionClause = ""
+    @Published var taskSeconds: Double = 0
 
     var isListening: Bool { status == .listening }
 
@@ -36,6 +37,7 @@ final class VoiceController: ObservableObject {
     private var cancellables: Set<AnyCancellable> = []
     private var startTask: Task<Void, Never>?
     private var confirmationTimeoutTask: Task<Void, Never>?
+    private var taskStartedAt: Date?
     private var frontmostObserver: NSObjectProtocol?
     private(set) var lastExternalFrontmostApp: String?
 
@@ -62,10 +64,12 @@ final class VoiceController: ObservableObject {
         recognizer.onFinalTranscript = { [weak self] text in
             Task { @MainActor in
                 guard let self else { return }
+                self.beginTask()
                 if AgentRunner.shared.isRunning,
                    ["stop", "cancel", "never mind", "nevermind"].contains(text.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)) {
                     AgentRunner.shared.cancel()
                     self.status = .idle
+                    self.completeTask()
                 } else if AgentRunner.shared.resolveConfirmation(text) {
                     self.awaitingVoiceAnswer = false
                 } else if self.awaitingVoiceAnswer {
@@ -83,7 +87,7 @@ final class VoiceController: ObservableObject {
             if let error {
                 self.status = .error("Speech recognition failed: \(error.localizedDescription)")
                 self.speakError(error.localizedDescription)
-                self.onDone?()
+                self.completeTask()
             } else {
                 self.status = .idle
             }
@@ -115,6 +119,19 @@ final class VoiceController: ObservableObject {
         missingPermissions = Permission.missing
     }
 
+    private func beginTask() {
+        taskSeconds = 0
+        taskStartedAt = Date()
+    }
+
+    func completeTask() {
+        if let taskStartedAt {
+            taskSeconds = Date().timeIntervalSince(taskStartedAt)
+            self.taskStartedAt = nil
+        }
+        onDone?()
+    }
+
     func clearHistory() {
         decisions = []
         if case .done = status {
@@ -142,7 +159,7 @@ final class VoiceController: ObservableObject {
         case .executing:
             AgentRunner.shared.cancel()
             status = .idle
-            onDone?()
+            completeTask()
         case .idle, .done, .error:
             startListening()
         default:
@@ -164,7 +181,7 @@ final class VoiceController: ObservableObject {
             guard granted else {
                 status = .error("Microphone or Speech Recognition permission denied")
                 await speaker.say("Microphone or Speech Recognition permission denied")
-                onDone?()
+                completeTask()
                 return
             }
             do {
@@ -179,7 +196,7 @@ final class VoiceController: ObservableObject {
             } catch {
                 status = .error(error.localizedDescription)
                 speakError(error.localizedDescription)
-                onDone?()
+                completeTask()
             }
         }
     }
@@ -247,7 +264,7 @@ final class VoiceController: ObservableObject {
         if let interpretationError {
             status = .error(interpretationError.localizedDescription)
             speakError(interpretationError.localizedDescription)
-            onDone?()
+            completeTask()
             return
         }
 
@@ -262,7 +279,7 @@ final class VoiceController: ObservableObject {
             }
             status = .error(reason)
             await speakIfEnabled(reason)
-            onDone?()
+            completeTask()
         }
     }
 
@@ -301,7 +318,7 @@ final class VoiceController: ObservableObject {
             let reason = "Add a DeepSeek key (or set up oMLX) in Settings so Jev can write text for you"
             status = .error(reason)
             await speakIfEnabled(reason)
-            onDone?()
+            completeTask()
             return false
         }
         status = .thinking
@@ -323,7 +340,7 @@ final class VoiceController: ObservableObject {
                 let reason = error.localizedDescription
                 status = .error(reason)
                 await speakIfEnabled(reason)
-                onDone?()
+                completeTask()
                 return false
             }
         }
@@ -352,7 +369,7 @@ final class VoiceController: ObservableObject {
         suggestionClause = clause
         status = .error("I didn't catch the app")
         await speakIfEnabled("I didn't catch the app — did you mean \(candidates[0])?")
-        onDone?()
+        completeTask()
         return true
     }
 
@@ -438,6 +455,7 @@ final class VoiceController: ObservableObject {
         suggestions = []
         suggestionClause = ""
         status = .idle
+        completeTask()
     }
 
     private func executeAll() async {
@@ -446,7 +464,7 @@ final class VoiceController: ObservableObject {
             let reason = agentUnavailableReason()
             status = .error(reason)
             await speakIfEnabled(reason)
-            onDone?()
+            completeTask()
             return
         }
         status = .executing
@@ -459,7 +477,7 @@ final class VoiceController: ObservableObject {
                         let reason = agentUnavailableReason()
                         status = .error(reason)
                         await speakIfEnabled(reason)
-                        onDone?()
+                        completeTask()
                         return
                     }
                     if previousAction == .openApp {
@@ -487,11 +505,11 @@ final class VoiceController: ObservableObject {
                         )
                         status = .error(reason)
                         await speakIfEnabled(reason)
-                        onDone?()
+                        completeTask()
                         return
                     case .cancelled:
                         status = .idle
-                        onDone?()
+                        completeTask()
                         return
                     }
                     continue
@@ -519,7 +537,7 @@ final class VoiceController: ObservableObject {
                 )
                 status = .error(error.localizedDescription)
                 speakError(error.localizedDescription)
-                onDone?()
+                completeTask()
                 return
             }
         }
@@ -527,7 +545,7 @@ final class VoiceController: ObservableObject {
         if config.speakReplies {
             await speaker.say(results.joined(separator: ". "))
         }
-        onDone?()
+        completeTask()
     }
 
     func agentUnavailableReason() -> String {

@@ -363,21 +363,34 @@ final class CuaDriver: ObservableObject {
         ])
     }
 
-    func type(pid: Int, text: String, token: String? = nil) async throws -> CuaResult {
+    func type(
+        pid: Int,
+        text: String,
+        token: String? = nil,
+        windowId: Int? = nil
+    ) async throws -> CuaResult {
         var args: [String: JSONValue] = [
             "pid": .number(Double(pid)),
             "text": .string(text),
         ]
         if let token { args["element_token"] = .string(token) }
+        if let windowId { args["window_id"] = .number(Double(windowId)) }
         return try await call("type_text", args)
     }
 
-    func pressKey(pid: Int, key: String, modifiers: [String] = []) async throws -> CuaResult {
-        try await call("press_key", [
+    func pressKey(
+        pid: Int,
+        key: String,
+        modifiers: [String] = [],
+        windowId: Int? = nil
+    ) async throws -> CuaResult {
+        var args: [String: JSONValue] = [
             "pid": .number(Double(pid)),
             "key": .string(key),
             "modifiers": .array(modifiers.map(JSONValue.string)),
-        ])
+        ]
+        if let windowId { args["window_id"] = .number(Double(windowId)) }
+        return try await call("press_key", args)
     }
 
     private func driverURL() throws -> URL {
