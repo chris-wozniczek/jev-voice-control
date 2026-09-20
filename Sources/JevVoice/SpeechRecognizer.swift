@@ -130,10 +130,19 @@ final class SpeechRecognizer: ObservableObject {
     }
 
     private func hasEndWord(_ text: String) -> Bool {
-        text.range(
-            of: #"\b(go|do it|execute|send it|over)[.!?,;]*$"#,
+        guard text.range(
+            of: #"\b(do it|execute|send it|over|that's it)[.!?,;]*$"#,
             options: [.regularExpression, .caseInsensitive]
-        ) != nil
+        ) != nil else {
+            return false
+        }
+        let prefix = text.replacingOccurrences(
+            of: #"\s+(do it|execute|send it|over|that's it)[.!?,;]*$"#,
+            with: "",
+            options: [.regularExpression, .caseInsensitive]
+        )
+        guard prefix != text else { return false }
+        return prefix.split(whereSeparator: { $0.isWhitespace }).count >= 2
     }
 
     private func stripEndWord(_ text: String) -> String {

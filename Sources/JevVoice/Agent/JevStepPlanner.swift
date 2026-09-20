@@ -31,7 +31,7 @@ final class JevStepPlanner: ActionPlanner {
         let element: CuaElement
 
         var elementRoleIsText: Bool {
-            element.role == "AXTextField" || element.role == "AXTextArea"
+            ["AXTextField", "AXTextArea", "AXSearchField"].contains(element.role)
         }
     }
 
@@ -174,6 +174,12 @@ final class JevStepPlanner: ActionPlanner {
         }
         if goalReached >= 0.7,
            ctx.history.contains(where: { ["click", "click_at", "type_text", "press_key", "open_app"].contains($0.tool) }) {
+            if textToType != nil, ctx.typedTextVisible == false {
+                return stuckTurn(
+                    reason: "The typed text is not visible in the current field",
+                    step: ctx.stepIndex + 1
+                )
+            }
             return makeTurn(call: DeepSeekToolCall(
                 id: "jev-\(ctx.stepIndex + 1)",
                 name: "done",
@@ -270,7 +276,7 @@ final class JevStepPlanner: ActionPlanner {
     }
 
     private func makeCandidates(_ elements: [CuaElement]) -> [Candidate] {
-        let textRoles = Set(["AXTextField", "AXTextArea"])
+        let textRoles = Set(["AXTextField", "AXTextArea", "AXSearchField"])
         let interactiveCount = elements.filter {
             interactiveRoles.contains($0.role)
                 && (!$0.label.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty

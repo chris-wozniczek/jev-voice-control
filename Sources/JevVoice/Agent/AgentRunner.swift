@@ -46,6 +46,7 @@ final class AgentRunner: ObservableObject {
     private var lastCDPTitle: String?
     private var lastCDPPort: Int?
     private var targetApp: String?
+    private var currentGoal = ""
     private var confirmationContinuation: CheckedContinuation<Bool, Never>?
     private var cancellationRequested = false
     private var cachedApps: [CuaApp]?
@@ -112,6 +113,7 @@ final class AgentRunner: ObservableObject {
         cuaSeconds = 0
         let runStarted = Date()
         targetApp = context.frontmostApp
+        currentGoal = goal
         Log.agent.info(
             "run start goal=\(goal, privacy: .public) targetApp=\((self.targetApp ?? "none"), privacy: .public)"
         )
@@ -229,6 +231,10 @@ final class AgentRunner: ObservableObject {
                     plannerContext.snapshot = lastSnapshot
                     plannerContext.windowTitle = lastWindowTitle
                     plannerContext.targetApp = targetApp
+                    plannerContext.typedTextVisible = typedTextVisible(
+                        goal: goal,
+                        snapshot: lastSnapshot
+                    )
                     plannerContext.history.append(PlannerStepRecord(
                         tool: call.name,
                         argsSummary: step.argsSummary,
@@ -277,6 +283,10 @@ final class AgentRunner: ObservableObject {
                     plannerContext.snapshot = lastSnapshot
                     plannerContext.windowTitle = lastWindowTitle
                     plannerContext.targetApp = targetApp
+                    plannerContext.typedTextVisible = typedTextVisible(
+                        goal: goal,
+                        snapshot: lastSnapshot
+                    )
                     plannerContext.history.append(PlannerStepRecord(
                         tool: call.name,
                         argsSummary: step.argsSummary,
@@ -507,6 +517,12 @@ final class AgentRunner: ObservableObject {
                 throw AgentError.api("type_text requires text")
             }
             let token = call.arguments["element_token"]?.stringValue
+            guard let pid = lastPID else { throw AgentError.api("Observe a window before typing") }
+            guard await KeyboardFocus.bringToFront(pid: pid_t(pid)) else {
+                throw AgentError.api(
+                    "Couldn't bring \(targetApp ?? lastApp?.name ?? "the app") to the front to type"
+                )
+            }
             try await confirmIfRisky(tool: "type_text", token: token, key: nil)
             if let token, token.hasPrefix("cdp:") {
                 guard let title = lastCDPTitle, let port = lastCDPPort else {
@@ -518,9 +534,9 @@ final class AgentRunner: ObservableObject {
                     token: token,
                     text: text
                 )
-                return try await afterMutation("Typed text")
+                let result = verifiedTypingResult(pid: pid, text: text, fallback: "Typed text")
+                return try await afterMutation(result)
             }
-            guard let pid = lastPID else { throw AgentError.api("Observe a window before typing") }
             if let token, token.hasPrefix("ocr:") {
                 guard let point = lastOCRPoints[token] else {
                     throw AgentError.api("Observe the window again — that element is stale")
@@ -537,7 +553,9 @@ final class AgentRunner: ObservableObject {
                         windowId: lastWindowID
                     )
                 }
-                return try await afterMutation(result.text ?? "Typed text")
+                return try await afterMutation(
+                    verifiedTypingResult(pid: pid, text: text, fallback: result.text ?? "Typed text")
+                )
             }
             if let token, token.hasPrefix("ax:") {
                 guard let entry = lastAXEntries[token] else {
@@ -556,7 +574,12 @@ final class AgentRunner: ObservableObject {
                         windowId: lastWindowID
                     )
                 }
-                return try await afterMutation(result.text ?? "Typed text")
+                return try await afterMutation(
+                    verifiedTypingResult(pid: pid, text: text, fallback: result.text ?? "Typed text")
+                )
+            }
+            if token == nil {
+                try await focusTextElementIfNeeded(pid: pid)
             }
             let result = try await measureCua {
                 try await CuaDriver.shared.type(
@@ -566,7 +589,9 @@ final class AgentRunner: ObservableObject {
                     windowId: token == nil ? lastWindowID : nil
                 )
             }
-            return try await afterMutation(result.text ?? "Typed text")
+            return try await afterMutation(
+                verifiedTypingResult(pid: pid, text: text, fallback: result.text ?? "Typed text")
+            )
         case "press_key":
             guard let key = call.arguments["key"]?.stringValue,
                   let pid = lastPID,
@@ -574,6 +599,11 @@ final class AgentRunner: ObservableObject {
                 throw AgentError.api("Observe a window before pressing keys")
             }
             let modifiers = call.arguments["modifiers"]?.arrayValue?.compactMap(\.stringValue) ?? []
+            guard await KeyboardFocus.bringToFront(pid: pid_t(pid)) else {
+                throw AgentError.api(
+                    "Couldn't bring \(targetApp ?? lastApp?.name ?? "the app") to the front to press keys"
+                )
+            }
             try await confirmIfRisky(tool: "press_key", token: nil, key: key)
             let result = try await measureCua {
                 try await CuaDriver.shared.pressKey(
@@ -1030,6 +1060,113 @@ final class AgentRunner: ObservableObject {
             content: "\(text). Window title now observed; \(lastSnapshot?.elements.count ?? 0) elements.\n\(observation.text)",
             image: observation.image
         )
+    }
+
+    private func focusTextElementIfNeeded(pid: Int) async throws {
+        if let focused = KeyboardFocus.focusedElement(pid: pid_t(pid)),
+           KeyboardFocus.textRoles.contains(focused.role) {
+            return
+        }
+        let fields = lastSnapshot?.elements.filter {
+            ["AXTextField", "AXTextArea", "AXSearchField"].contains($0.role)
+                && !$0.label.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        } ?? []
+        guard !fields.isEmpty else { return }
+        let goalWords = Set(currentGoal.lowercased().split {
+            !$0.isLetter && !$0.isNumber
+        }.map(String.init))
+        let element = fields.max { lhs, rhs in
+            let lhsScore = Set(lhs.label.lowercased().split {
+                !$0.isLetter && !$0.isNumber
+            }.map(String.init)).intersection(goalWords).count
+            let rhsScore = Set(rhs.label.lowercased().split {
+                !$0.isLetter && !$0.isNumber
+            }.map(String.init)).intersection(goalWords).count
+            return lhsScore < rhsScore
+        }
+        guard let element else {
+            return
+        }
+        Log.agent.info("stage=focus role=\(element.role, privacy: .public)")
+        guard let entry = lastAXEntries[element.token] else {
+            let result = try await measureCua {
+                try await CuaDriver.shared.click(
+                    pid: pid,
+                    token: element.token
+                )
+            }
+            _ = result
+            return
+        }
+        do {
+            try AXTreeReader.press(entry)
+        } catch {
+            do {
+                try AXTreeReader.focus(entry)
+            } catch {
+                let result = try await measureCua {
+                    try await CuaDriver.shared.click(
+                        pid: pid,
+                        token: element.token
+                    )
+                }
+                _ = result
+            }
+        }
+    }
+
+    private func verifiedTypingResult(pid: Int, text: String, fallback: String) -> String {
+        let firstReadBack: KeyboardFocus.ReadBack
+        if let focused = KeyboardFocus.focusedElement(pid: pid_t(pid)),
+           KeyboardFocus.textRoles.contains(focused.role) {
+            firstReadBack = KeyboardFocus.readBack(value: focused.value, expected: text)
+        } else {
+            firstReadBack = .unobservable
+        }
+        switch firstReadBack {
+        case .confirmed:
+            return fallback
+        case .unobservable:
+            Log.agent.info("type readback=unobservable")
+            return "\(fallback) (unverified)"
+        case .missing:
+            Log.agent.info("type readback=miss")
+            KeyboardFocus.typeUnicode(text)
+            let secondReadBack: KeyboardFocus.ReadBack
+            if let focused = KeyboardFocus.focusedElement(pid: pid_t(pid)),
+               KeyboardFocus.textRoles.contains(focused.role) {
+                secondReadBack = KeyboardFocus.readBack(value: focused.value, expected: text)
+            } else {
+                secondReadBack = .unobservable
+            }
+            switch secondReadBack {
+            case .confirmed:
+                return fallback
+            case .unobservable:
+                Log.agent.info("type readback=unobservable")
+                return "\(fallback) (unverified)"
+            case .missing:
+                return "Typed \(text) but the field did not show it"
+            }
+        }
+    }
+
+    private func typedTextVisible(goal: String, snapshot: CuaSnapshot?) -> Bool? {
+        guard let expected = SlotExtractor.typedText(from: goal) else { return nil }
+        guard let snapshot else { return false }
+        let textElements = snapshot.elements.filter {
+            KeyboardFocus.textRoles.contains($0.role)
+        }
+        guard textElements.contains(where: {
+            guard let value = $0.value else { return false }
+            return !value.isEmpty
+        }) else {
+            return nil
+        }
+        return snapshot.elements.contains {
+            KeyboardFocus.confirmsTyped(value: $0.value, expected: expected)
+                || KeyboardFocus.confirmsTyped(value: $0.label, expected: expected)
+        }
     }
 
     private func confirmIfRisky(tool: String, token: String?, key: String?) async throws {

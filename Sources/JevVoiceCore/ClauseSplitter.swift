@@ -146,7 +146,7 @@ public enum ClauseSplitter {
 
     public static func stripTrailingEndWord(_ transcript: String) -> String {
         var result = transcript.replacingOccurrences(
-            of: #"\s+(go|do it|execute|send it|over)[.!?,;]*$"#,
+            of: #"\s+(do it|execute|send it|over|that's it)[.!?,;]*$"#,
             with: "",
             options: [.regularExpression, .caseInsensitive]
         ).trimmingCharacters(in: .whitespacesAndNewlines)

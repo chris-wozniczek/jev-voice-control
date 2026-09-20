@@ -29,6 +29,12 @@ task target, and asks for confirmation before actions that sound hard to undo.
 Speech is transcribed **on-device** (SFSpeechRecognizer). Only the transcript is
 sent to the Jev API.
 
+Typing activates the target app before every keystroke path and reads the
+focused field back after typing. If the field does not show the text, Jev uses
+an in-process Unicode keyboard fallback and keeps the task open for
+verification. Settings › Hearing includes extra vocabulary for sites, models,
+and products; the same words are supplied to Apple Speech and Whisper.
+
 ## How it works
 
 ### How it decides
@@ -178,6 +184,9 @@ When an app exposes almost no accessible controls, the optional OCR fallback
 uses Apple Vision locally to read visible labels and click their screen
 coordinates. It requires Screen Recording permission and can be disabled in
 Settings › Computer use.
+
+End words are `do it`, `execute`, `send it`, `over`, and `that's it`; `go` is
+kept as navigation language rather than ending a command.
 
 ## Debugging
 

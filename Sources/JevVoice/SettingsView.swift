@@ -342,6 +342,22 @@ struct SettingsView: View {
                             .frame(width: 38, alignment: .trailing)
                     }
                 }
+                TextField(
+                    "Extra words (comma-separated)",
+                    text: Binding(
+                        get: { config.customVocabulary.joined(separator: ", ") },
+                        set: {
+                            config.customVocabulary = $0
+                                .split(separator: ",")
+                                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                                .filter { !$0.isEmpty }
+                        }
+                    )
+                )
+                .textFieldStyle(.roundedBorder)
+                Text("Names the recognizer should expect: sites, models, products.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
                 Text("Whisper hears app names like cmux and Devin more reliably; runs fully offline.")
                     .font(.caption2)
                     .foregroundStyle(.secondary)

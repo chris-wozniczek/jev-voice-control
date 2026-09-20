@@ -178,6 +178,57 @@ final class JevStepPlannerTests: XCTestCase {
     }
 
     @MainActor
+    func testTypedGoalCannotReturnDoneWhenFreshValueIsMissing() async throws {
+        let fake = FakeJev(
+            answer: .choice(choice: "done", confidence: 0.9, probabilities: ["done": 0.9]),
+            goalReached: 0.9
+        )
+        let planner = JevStepPlanner(client: fake, canEscalate: false)
+        let turn = try await planner.next(PlannerContext(
+            goal: #"type "hello world""#,
+            snapshot: snapshot([
+                CuaElement(token: "tok-input", role: "AXTextField", label: "Message", value: ""),
+            ]),
+            typedTextVisible: false,
+            history: [
+                PlannerStepRecord(
+                    tool: "type_text",
+                    argsSummary: "text=hello world",
+                    resultText: "Typed hello world but the field did not show it",
+                    succeeded: true
+                ),
+            ],
+            stepIndex: 1
+        ))
+        XCTAssertEqual(turn.toolCalls.first?.name, "fail")
+    }
+
+    @MainActor
+    func testElectronLikeSnapshotWithUnobservableValueCanReturnDone() async throws {
+        let fake = FakeJev(
+            answer: .choice(choice: "done", confidence: 0.9, probabilities: ["done": 0.9]),
+            goalReached: 0.9
+        )
+        let planner = JevStepPlanner(client: fake, canEscalate: false)
+        let turn = try await planner.next(PlannerContext(
+            goal: #"type "hello world""#,
+            snapshot: snapshot([
+                CuaElement(token: "tok-web", role: "AXWebArea", label: "Message", value: nil),
+            ]),
+            history: [
+                PlannerStepRecord(
+                    tool: "type_text",
+                    argsSummary: "text=hello world",
+                    resultText: "Typed hello world (unverified)",
+                    succeeded: true
+                ),
+            ],
+            stepIndex: 1
+        ))
+        XCTAssertEqual(turn.toolCalls.first?.name, "done")
+    }
+
+    @MainActor
     func testDoneWithLowGoalConfidenceChoosesAlternative() async throws {
         let fake = FakeJev(
             answer: .choice(choice: "done", confidence: 0.9, probabilities: ["done": 0.9, "e1": 0.6]),
