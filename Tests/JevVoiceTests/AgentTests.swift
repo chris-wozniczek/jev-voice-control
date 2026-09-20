@@ -142,30 +142,19 @@ final class AgentTests: XCTestCase {
     }
 
     @MainActor
-    func testResidualOpenIntentRoutesOnlyWithKey() {
+    func testUITaskDoesNotRouteToAgent() {
         let decision = Decision(
-            clause: "open a new session in devin",
-            action: .openApp,
+            clause: "start a new session",
+            action: .uiTask,
             targetApp: "Devin",
             model: "local"
         )
-        XCTAssertTrue(VoiceController.shouldRoute(
-            transcript: "open a new session in devin",
+        XCTAssertFalse(VoiceController.shouldRoute(
+            transcript: "start a new session",
             decisions: [decision],
             verdict: .run,
             agentAvailable: true,
             enabled: true,
-            installedApps: ["Devin", "Google Chrome"],
-            aliases: AppMatcher.builtInAliases
-        ))
-        XCTAssertFalse(VoiceController.shouldRoute(
-            transcript: "open a new session in devin",
-            decisions: [decision],
-            verdict: .run,
-            agentAvailable: false,
-            enabled: true,
-            installedApps: ["Devin", "Google Chrome"],
-            aliases: AppMatcher.builtInAliases
         ))
     }
 
@@ -201,13 +190,13 @@ final class AgentTests: XCTestCase {
     }
 
     @MainActor
-    func testUnknownOpenIntentRoutesWithKeyButKeepsSuggestionsWithoutKey() {
+    func testUnresolvedOpenIntentDoesNotUseResidualRoutingHeuristic() {
         let decision = Decision(
             clause: "open a new session",
             action: .openApp,
             model: "local"
         )
-        XCTAssertTrue(VoiceController.shouldRoute(
+        XCTAssertFalse(VoiceController.shouldRoute(
             transcript: "open a new session",
             decisions: [decision],
             verdict: .run,

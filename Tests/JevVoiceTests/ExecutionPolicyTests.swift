@@ -51,4 +51,29 @@ final class ExecutionPolicyTests: XCTestCase {
         )
         XCTAssertEqual(decision.riskTier, .caution)
     }
+
+    func testDestructiveDecisionRequiresConfirmation() {
+        let decision = Decision(
+            clause: "submit the order",
+            action: .uiTask,
+            destructive: true,
+            confidence: 0.9
+        )
+        XCTAssertEqual(
+            ExecutionPolicy.verdict(for: [decision], alwaysConfirm: false),
+            .confirm(reason: "This sounds hard to undo — confirm?")
+        )
+    }
+
+    func testLowConfidenceUITaskRunsWithoutConfirmation() {
+        let decision = Decision(
+            clause: "click the new session button",
+            action: .uiTask,
+            confidence: 0.3
+        )
+        XCTAssertEqual(
+            ExecutionPolicy.verdict(for: [decision], alwaysConfirm: false),
+            .run
+        )
+    }
 }

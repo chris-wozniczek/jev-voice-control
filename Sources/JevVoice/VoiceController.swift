@@ -383,6 +383,45 @@ final class VoiceController: ObservableObject {
         var results: [String] = []
         for decision in actionable {
             do {
+                if decision.action == .uiTask {
+                    guard config.computerUseEnabled, agentAvailable else {
+                        let reason = agentUnavailableReason()
+                        status = .error(reason)
+                        await speakIfEnabled(reason)
+                        onDone?()
+                        return
+                    }
+                    if previousAction == .openApp {
+                        try await Task.sleep(nanoseconds: 1_200_000_000)
+                    }
+                    status = .executing
+                    let target = decision.targetApp ?? lastExternalFrontmostApp
+                    let outcome = await AgentRunner.shared.run(
+                        goal: decision.clause,
+                        context: AgentContext(frontmostApp: target)
+                    )
+                    switch outcome {
+                    case .done(let summary):
+                        results.append(summary)
+                        Log.command.info(
+                            "executor result action=uiTask result=\(summary, privacy: .public)"
+                        )
+                        previousAction = .uiTask
+                    case .failed(let reason):
+                        Log.command.info(
+                            "executor error action=uiTask error=\(reason, privacy: .public)"
+                        )
+                        status = .error(reason)
+                        await speakIfEnabled(reason)
+                        onDone?()
+                        return
+                    case .cancelled:
+                        status = .idle
+                        onDone?()
+                        return
+                    }
+                    continue
+                }
                 if decision.action == .dictate,
                    let previousAction,
                    [.openApp, .switchApp, .openURL, .webSearch].contains(previousAction) {
