@@ -60,9 +60,13 @@ final class Config: ObservableObject {
 		didSet { UserDefaults.standard.set(deepSeekAPIKey, forKey: "deepSeekAPIKey") }
 	}
 
-	@Published var computerUseEnabled: Bool {
-		didSet { UserDefaults.standard.set(computerUseEnabled, forKey: "computerUseEnabled") }
-	}
+    @Published var computerUseEnabled: Bool {
+        didSet { UserDefaults.standard.set(computerUseEnabled, forKey: "computerUseEnabled") }
+    }
+
+    @Published var appActionsEnabled: Bool {
+        didSet { UserDefaults.standard.set(appActionsEnabled, forKey: "appActionsEnabled") }
+    }
 
     @Published var cdpEnabled: Bool {
         didSet { UserDefaults.standard.set(cdpEnabled, forKey: "cdpEnabled") }
@@ -139,6 +143,7 @@ final class Config: ObservableObject {
             ?? ProcessInfo.processInfo.environment["DEEPSEEK_API_KEY"]
             ?? ""
         self.computerUseEnabled = defaults.object(forKey: "computerUseEnabled") as? Bool ?? true
+        self.appActionsEnabled = defaults.object(forKey: "appActionsEnabled") as? Bool ?? true
         self.cdpEnabled = defaults.object(forKey: "cdpEnabled") as? Bool ?? true
         self.cdpPort = defaults.object(forKey: "cdpPort") as? Int ?? 9222
         self.generatorSource = GeneratorSource(

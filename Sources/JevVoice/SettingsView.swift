@@ -10,6 +10,7 @@ struct SettingsView: View {
     @State private var aliasDrafts: [AliasDraft] = []
     @State private var driverTestStatus = ""
     @State private var hintCount = HintStore.shared.count
+    @State private var appActionCount = AppActionRegistry.shared.actions.count
 
     private var voices: [AVSpeechSynthesisVoice] {
         let preferredPrefixes = Locale.preferredLanguages.map {
@@ -96,6 +97,27 @@ struct SettingsView: View {
                             Toggle("Let Jev operate apps (Cua)", isOn: $config.computerUseEnabled)
                                 .toggleStyle(.switch)
                                 .controlSize(.small)
+                            Toggle("App shortcuts (app-actions.json)", isOn: $config.appActionsEnabled)
+                                .toggleStyle(.switch)
+                                .controlSize(.small)
+                            HStack {
+                                Text("\(appActionCount) actions loaded")
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                                Spacer()
+                                Button("Reveal file") {
+                                    AppActionRegistry.shared.ensureUserFileExists()
+                                    NSWorkspace.shared.activateFileViewerSelecting([
+                                        AppActionRegistry.userFileURL
+                                    ])
+                                }
+                                .controlSize(.small)
+                                Button("Reload") {
+                                    AppActionRegistry.shared.reload()
+                                    appActionCount = AppActionRegistry.shared.actions.count
+                                }
+                                .controlSize(.small)
+                            }
                             Toggle("Read web pages through Chrome DevTools when available", isOn: $config.cdpEnabled)
                                 .toggleStyle(.switch)
                                 .controlSize(.small)

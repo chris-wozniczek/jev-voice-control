@@ -134,6 +134,18 @@ final class AgentRunner: ObservableObject {
         lastWindowTitle = nil
         lastCDPTitle = nil
         lastCDPPort = nil
+        var effectivePlanner = planner
+        if Config.shared.appActionsEnabled,
+           let action = AppActionRegistry.shared.match(
+               goal: goal,
+               appName: targetApp,
+               bundleId: nil
+           ) {
+            effectivePlanner = FastPathPlanner(action: action, inner: planner)
+            Log.agent.info(
+                "fastpath matched action=\(action.name, privacy: .public) app=\(action.app, privacy: .public)"
+            )
+        }
         var successfulHints: [(app: String, role: String, label: String)] = []
         let frontmost = context.frontmostApp
             ?? NSWorkspace.shared.frontmostApplication?.localizedName
@@ -174,7 +186,7 @@ final class AgentRunner: ObservableObject {
                 if cancellationRequested { throw AgentError.cancelled }
                 try Task.checkCancellation()
                 guard callCount < 25 else { throw AgentError.budget }
-                let turn = try await plannerNext(planner, context: plannerContext)
+                let turn = try await plannerNext(effectivePlanner, context: plannerContext)
                 plannerContext.messages.append(turn.assistant)
                 guard let call = turn.toolCalls.first else {
                     throw AgentError.api("The planner did not choose an action")

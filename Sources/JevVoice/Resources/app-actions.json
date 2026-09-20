@@ -1,0 +1,9 @@
+{
+  "actions": [
+    {"app": "Devin", "name": "new session", "phrases": ["new session", "start a session", "create a session", "open a session", "another session"], "steps": [{"kind": "key", "key": "n", "modifiers": ["command"]}]},
+    {"app": "Notes", "name": "new note", "phrases": ["new note", "create a note", "start a note", "write a note", "make a note"], "steps": [{"kind": "key", "key": "n", "modifiers": ["command"]}]},
+    {"app": "cmux", "name": "new tab", "phrases": ["new tab", "open a tab"], "steps": [{"kind": "key", "key": "t", "modifiers": ["command"]}]},
+    {"app": "*", "name": "new tab", "phrases": ["new tab", "open a tab"], "steps": [{"kind": "key", "key": "t", "modifiers": ["command"]}]},
+    {"app": "*", "name": "new window", "phrases": ["new window", "open a window"], "steps": [{"kind": "key", "key": "n", "modifiers": ["command"]}]}
+  ]
+}
