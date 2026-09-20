@@ -88,6 +88,16 @@ final class AgentTests: XCTestCase {
     }
 
     @MainActor
+    func testNoneDecisionsRouteToAgent() {
+        for transcript in ["open a new session", "click new session", "start a new session"] {
+            let decision = Decision(clause: transcript, action: .none, confidence: 0.4, model: "jev")
+            XCTAssertTrue(VoiceController.shouldRoute(
+                transcript: transcript, decisions: [decision], verdict: .run, hasKey: true, enabled: true
+            ), transcript)
+        }
+    }
+
+    @MainActor
     func testRoutingRequiresKeyRegardlessOfTranscript() {
         for transcript in [
             "please open chrome now",

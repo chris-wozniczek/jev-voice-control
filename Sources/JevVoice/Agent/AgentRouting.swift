@@ -32,6 +32,7 @@ extension VoiceController {
         guard enabled, hasKey else { return false }
         if error != nil || decisions.isEmpty { return true }
         if case .reject = verdict { return true }
+        if decisions.allSatisfy({ $0.action == .none }) { return true }
         if decisions.contains(where: { decision in
             guard decision.model == "local",
                   [.openApp, .switchApp].contains(decision.action) else {
