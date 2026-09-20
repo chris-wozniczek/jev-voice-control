@@ -43,6 +43,33 @@ final class AppMatcherTests: XCTestCase {
         )
     }
 
+    func testResidualWords() {
+        XCTAssertEqual(
+            AppMatcher.residualWords(
+                clause: "open a new session in devin",
+                matchedApp: "Devin",
+                aliases: [:]
+            ),
+            ["new", "session"]
+        )
+        XCTAssertEqual(
+            AppMatcher.residualWords(
+                clause: "open google chrome",
+                matchedApp: "Google Chrome",
+                aliases: [:]
+            ),
+            []
+        )
+        XCTAssertEqual(
+            AppMatcher.residualWords(
+                clause: "open see mux",
+                matchedApp: "cmux",
+                aliases: ["see mux": "cmux"]
+            ),
+            []
+        )
+    }
+
     func testAliasWhoseTargetIsNotInstalledDoesNotMatch() {
         XCTAssertNil(AppMatcher.match(
             clause: "open chrome",
