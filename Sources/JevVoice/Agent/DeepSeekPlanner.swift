@@ -5,6 +5,24 @@ struct PlannerStepRecord: Equatable {
     let argsSummary: String
     let resultText: String
     let succeeded: Bool
+    let elementRole: String?
+    let elementLabel: String?
+
+    init(
+        tool: String,
+        argsSummary: String,
+        resultText: String,
+        succeeded: Bool,
+        elementRole: String? = nil,
+        elementLabel: String? = nil
+    ) {
+        self.tool = tool
+        self.argsSummary = argsSummary
+        self.resultText = resultText
+        self.succeeded = succeeded
+        self.elementRole = elementRole
+        self.elementLabel = elementLabel
+    }
 }
 
 struct PlannerContext {

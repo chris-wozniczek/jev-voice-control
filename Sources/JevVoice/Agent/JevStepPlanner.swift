@@ -37,6 +37,7 @@ final class JevStepPlanner: ActionPlanner {
 
     private let client: JevAnswering
     private let canEscalate: Bool
+    private let hints: HintStore
     private var previousActionKey: String?
     private var previousFingerprint: String?
 
@@ -46,9 +47,10 @@ final class JevStepPlanner: ActionPlanner {
         "AXRow", "AXCell",
     ]
 
-    init(client: JevAnswering, canEscalate: Bool) {
+    init(client: JevAnswering, canEscalate: Bool, hints: HintStore = .shared) {
         self.client = client
         self.canEscalate = canEscalate
+        self.hints = hints
     }
 
     func next(_ ctx: PlannerContext) async throws -> PlannerTurn {
@@ -77,6 +79,18 @@ final class JevStepPlanner: ActionPlanner {
         }
 
         let textToType = SlotExtractor.typedText(from: ctx.goal)
+        let clickedLabels: Set<String> = Set(ctx.history.compactMap { record -> String? in
+            guard record.succeeded,
+                  ["click", "click_at"].contains(record.tool),
+                  let label = record.elementLabel else { return nil }
+            return label
+        })
+        let workedBefore = (ctx.targetApp.map { hints.hints(app: $0, goal: ctx.goal) } ?? [])
+            .filter { !clickedLabels.contains($0.label) }
+        let workedBeforeDescriptions: [String] = workedBefore.map { hint in
+            let role = promptRole(hint.role)
+            return "click \(role) \"\(hint.label)\""
+        }
         let previousActions = ctx.history.suffix(6).map {
             "\($0.tool) \($0.argsSummary) → \($0.resultText)"
         }
@@ -86,6 +100,7 @@ final class JevStepPlanner: ActionPlanner {
             "window_title": ctx.windowTitle.map(JSONValue.string) ?? .null,
             "step": .number(Double(ctx.stepIndex)),
             "previous_actions": .array(previousActions.map(JSONValue.string)),
+            "worked_before": .array(workedBeforeDescriptions.map(JSONValue.string)),
             "text_to_type": textToType.map(JSONValue.string) ?? .null,
             "elements": .array(candidates.map { candidate in
                 .object([
@@ -96,13 +111,20 @@ final class JevStepPlanner: ActionPlanner {
                 ])
             }),
         ])
-        var criteria = Dictionary(uniqueKeysWithValues: candidates.map { candidate in
-            (
+        var criteria: [String: String?] = Dictionary(uniqueKeysWithValues: candidates.map { candidate in
+            let base = candidate.elementRoleIsText
+                ? "Type `\(textToType ?? "")` into the \(promptRole(candidate.element.role)) labelled \"\(candidate.element.label)\""
+                : "Click the \(promptRole(candidate.element.role)) labelled \"\(candidate.element.label)\""
+            let hasWorkedBefore = workedBefore.contains {
+                promptRole($0.role) == promptRole(candidate.element.role)
+                    && $0.label == candidate.element.label
+            }
+            return (
                 candidate.id,
                 Optional(
-                    candidate.elementRoleIsText
-                        ? "Type `\(textToType ?? "")` into the \(promptRole(candidate.element.role)) labelled \"\(candidate.element.label)\""
-                        : "Click the \(promptRole(candidate.element.role)) labelled \"\(candidate.element.label)\""
+                    hasWorkedBefore
+                        ? "\(base) (worked before for a similar request)"
+                        : base
                 )
             )
         })

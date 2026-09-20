@@ -39,9 +39,13 @@ final class AgentRunner: ObservableObject {
     private var lastWindowID: Int?
     private var lastSnapshot: CuaSnapshot?
     private var lastWindowTitle: String?
+    private var lastCDPTitle: String?
+    private var lastCDPPort: Int?
     private var targetApp: String?
     private var confirmationContinuation: CheckedContinuation<Bool, Never>?
     private var cancellationRequested = false
+
+    var hintStore: HintStore = .shared
 
     private init() {}
 
@@ -105,6 +109,9 @@ final class AgentRunner: ObservableObject {
         lastWindowID = nil
         lastSnapshot = nil
         lastWindowTitle = nil
+        lastCDPTitle = nil
+        lastCDPPort = nil
+        var successfulHints: [(app: String, role: String, label: String)] = []
         let frontmost = context.frontmostApp
             ?? NSWorkspace.shared.frontmostApplication?.localizedName
             ?? "unknown"
@@ -150,6 +157,13 @@ final class AgentRunner: ObservableObject {
                 }
                 callCount += 1
                 let started = Date()
+                let elementBeforeMutation: CuaElement? = {
+                    guard ["click", "type_text"].contains(call.name),
+                          let token = call.arguments["element_token"]?.stringValue else {
+                        return nil
+                    }
+                    return lastSnapshot?.element(token: token)
+                }()
                 var step = AgentStep(
                     index: callCount,
                     tool: call.name,
@@ -179,10 +193,28 @@ final class AgentRunner: ObservableObject {
                         tool: call.name,
                         argsSummary: step.argsSummary,
                         resultText: output.text,
-                        succeeded: true
+                        succeeded: true,
+                        elementRole: elementBeforeMutation?.role,
+                        elementLabel: elementBeforeMutation?.label
                     ))
+                    if call.name == "click" || call.name == "type_text",
+                       let app = targetApp,
+                       let role = elementBeforeMutation?.role,
+                       let label = elementBeforeMutation?.label,
+                       !label.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        successfulHints.append((app: app, role: role, label: label))
+                    }
                     plannerContext.stepIndex = callCount
                     if call.name == "done" {
+                        for hint in successfulHints {
+                            hintStore.record(
+                                app: hint.app,
+                                goal: goal,
+                                role: hint.role,
+                                label: hint.label
+                            )
+                        }
+                        hintStore.save()
                         outcomeDescription = "done"
                         return .done(output.text)
                     }
@@ -209,7 +241,9 @@ final class AgentRunner: ObservableObject {
                         tool: call.name,
                         argsSummary: step.argsSummary,
                         resultText: error.localizedDescription,
-                        succeeded: false
+                        succeeded: false,
+                        elementRole: elementBeforeMutation?.role,
+                        elementLabel: elementBeforeMutation?.label
                     ))
                     plannerContext.stepIndex = callCount
                 }
@@ -243,6 +277,10 @@ final class AgentRunner: ObservableObject {
     func clearSteps() {
         guard !isRunning else { return }
         steps = []
+    }
+
+    func setSnapshotForTesting(_ snapshot: CuaSnapshot?) {
+        lastSnapshot = snapshot
     }
 
     func resolveConfirmation(_ transcript: String) -> Bool {
@@ -288,6 +326,13 @@ final class AgentRunner: ObservableObject {
                 throw AgentError.api("click requires an element token")
             }
             try await confirmIfRisky(tool: "click", token: token, key: nil)
+            if token.hasPrefix("cdp:") {
+                guard let title = lastCDPTitle, let port = lastCDPPort else {
+                    throw AgentError.api("Observe a Chrome page first")
+                }
+                try await CDPBridge.shared.click(port: port, windowTitle: title, token: token)
+                return try await afterMutation("Clicked")
+            }
             guard let pid = lastPID else { throw AgentError.api("Observe a window first") }
             let result = try await CuaDriver.shared.click(pid: pid, token: token)
             return try await afterMutation(result.text ?? "Clicked")
@@ -301,10 +346,24 @@ final class AgentRunner: ObservableObject {
             let result = try await CuaDriver.shared.click(pid: pid, windowId: window, x: x, y: y)
             return try await afterMutation(result.text ?? "Clicked")
         case "type_text":
-            guard let text = call.arguments["text"]?.stringValue,
-                  let pid = lastPID else { throw AgentError.api("Observe a window before typing") }
+            guard let text = call.arguments["text"]?.stringValue else {
+                throw AgentError.api("type_text requires text")
+            }
             let token = call.arguments["element_token"]?.stringValue
             try await confirmIfRisky(tool: "type_text", token: token, key: nil)
+            if let token, token.hasPrefix("cdp:") {
+                guard let title = lastCDPTitle, let port = lastCDPPort else {
+                    throw AgentError.api("Observe a Chrome page first")
+                }
+                try await CDPBridge.shared.type(
+                    port: port,
+                    windowTitle: title,
+                    token: token,
+                    text: text
+                )
+                return try await afterMutation("Typed text")
+            }
+            guard let pid = lastPID else { throw AgentError.api("Observe a window before typing") }
             let result = try await CuaDriver.shared.type(pid: pid, text: text, token: token)
             return try await afterMutation(result.text ?? "Typed text")
         case "press_key":
@@ -384,10 +443,43 @@ final class AgentRunner: ObservableObject {
             windowId: window.id,
             includeImage: includeImage && Permission.screenRecording.isGranted
         )
+        lastCDPTitle = nil
+        lastCDPPort = nil
+        var mergedSnapshot = snapshot
+        let cdpInteractiveRoles: Set<String> = [
+            "AXButton", "AXLink", "AXTextField", "AXTextArea", "AXMenuItem",
+            "AXTab", "AXCheckBox", "AXRadioButton", "AXPopUpButton", "AXComboBox",
+            "AXRow", "AXCell",
+        ]
+        if Config.shared.cdpEnabled,
+           Self.shouldTryCDP(
+               bundleId: app.bundleId,
+               interactiveCount: snapshot.elements.filter {
+                   cdpInteractiveRoles.contains($0.role)
+               }.count
+           ),
+           await CDPBridge.shared.isAvailable(port: Config.shared.cdpPort),
+           let cdpElements = try? await CDPBridge.shared.elements(
+               port: Config.shared.cdpPort,
+               windowTitle: window.title
+           ),
+           !cdpElements.isEmpty {
+            mergedSnapshot = CuaSnapshot(
+                snapshotId: snapshot.snapshotId,
+                treeMarkdown: snapshot.treeMarkdown,
+                elements: snapshot.elements + cdpElements,
+                image: snapshot.image
+            )
+            lastCDPTitle = window.title
+            lastCDPPort = Config.shared.cdpPort
+            Log.cua.info(
+                "cdp merged elements=\(cdpElements.count) title=\(window.title, privacy: .public)"
+            )
+        }
         lastPID = app.pid
         lastWindowID = window.id
         lastWindowTitle = window.title
-        lastSnapshot = snapshot
+        lastSnapshot = mergedSnapshot
         let extra = includeImage && !Permission.screenRecording.isGranted
             ? " Screenshot unavailable: allow Screen Recording and proceed with AX only."
             : ""
@@ -396,10 +488,10 @@ final class AgentRunner: ObservableObject {
             "AXTab", "AXCheckBox", "AXRadioButton", "AXPopUpButton", "AXComboBox",
             "AXRow", "AXCell",
         ]
-        let hasRoleData = snapshot.elements.contains { !$0.role.isEmpty }
+        let hasRoleData = mergedSnapshot.elements.contains { !$0.role.isEmpty }
         let treeSource: String
         if hasRoleData {
-            let ordered = snapshot.elements.enumerated().sorted {
+            let ordered = mergedSnapshot.elements.enumerated().sorted {
                 let lhs = interactiveRoles.contains($0.element.role)
                 let rhs = interactiveRoles.contains($1.element.role)
                 return lhs != rhs ? lhs : $0.offset < $1.offset
@@ -413,11 +505,15 @@ final class AgentRunner: ObservableObject {
         }
         let tree = String(treeSource.prefix(14000))
         let shownLines = tree.split(separator: "\n").count
-        let omitted = max(0, snapshot.elements.count - shownLines)
+        let omitted = max(0, mergedSnapshot.elements.count - shownLines)
         let text = "Running apps: \(reportedApps.map(\.name).joined(separator: ", ")); " +
-            "frontmost window: \(window.title). Elements: \(snapshot.elements.count).\n" +
+            "frontmost window: \(window.title). Elements: \(mergedSnapshot.elements.count).\n" +
             "\(tree)\(omitted > 0 ? "\n… \(omitted) more" : "")\(extra)"
         return ToolOutput(text: text, content: text, image: snapshot.image)
+    }
+
+    static func shouldTryCDP(bundleId: String?, interactiveCount: Int) -> Bool {
+        bundleId?.hasPrefix("com.google.Chrome") == true || interactiveCount < 3
     }
 
     static func pickWindow(_ windows: [CuaWindow], preferring lastWindowID: Int?) -> CuaWindow? {
@@ -457,7 +553,7 @@ final class AgentRunner: ObservableObject {
         }
     }
 
-    private func isRisky(token: String?, key: String?) -> Bool {
+    func isRisky(token: String?, key: String?) -> Bool {
         let label = token.flatMap { lastSnapshot?.element(token: $0)?.label }?.lowercased() ?? ""
         if AgentRisk.matchesDestructiveWord(label) { return true }
         guard let key = key?.lowercased(), key == "return" || key == "enter" else { return false }

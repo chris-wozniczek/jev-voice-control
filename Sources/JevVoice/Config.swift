@@ -60,6 +60,14 @@ final class Config: ObservableObject {
 		didSet { UserDefaults.standard.set(computerUseEnabled, forKey: "computerUseEnabled") }
 	}
 
+    @Published var cdpEnabled: Bool {
+        didSet { UserDefaults.standard.set(cdpEnabled, forKey: "cdpEnabled") }
+    }
+
+    @Published var cdpPort: Int {
+        didSet { UserDefaults.standard.set(cdpPort, forKey: "cdpPort") }
+    }
+
     @Published var plannerMode: PlannerMode {
         didSet { UserDefaults.standard.set(plannerMode.rawValue, forKey: "plannerMode") }
     }
@@ -111,6 +119,8 @@ final class Config: ObservableObject {
             ?? ProcessInfo.processInfo.environment["DEEPSEEK_API_KEY"]
             ?? ""
         self.computerUseEnabled = defaults.object(forKey: "computerUseEnabled") as? Bool ?? true
+        self.cdpEnabled = defaults.object(forKey: "cdpEnabled") as? Bool ?? true
+        self.cdpPort = defaults.object(forKey: "cdpPort") as? Int ?? 9222
         self.plannerMode = PlannerMode(
             rawValue: defaults.string(forKey: "plannerMode") ?? ""
         ) ?? .jev

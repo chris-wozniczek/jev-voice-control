@@ -9,6 +9,7 @@ struct SettingsView: View {
     @ObservedObject private var whisperStore = WhisperModelStore.shared
     @State private var aliasDrafts: [AliasDraft] = []
     @State private var driverTestStatus = ""
+    @State private var hintCount = HintStore.shared.count
 
     private var voices: [AVSpeechSynthesisVoice] {
         let preferredPrefixes = Locale.preferredLanguages.map {
@@ -79,9 +80,38 @@ struct SettingsView: View {
                             Toggle("Let Jev operate apps (Cua)", isOn: $config.computerUseEnabled)
                                 .toggleStyle(.switch)
                                 .controlSize(.small)
+                            Toggle("Read web pages through Chrome DevTools when available", isOn: $config.cdpEnabled)
+                                .toggleStyle(.switch)
+                                .controlSize(.small)
+                            HStack {
+                                Text("CDP port")
+                                TextField(
+                                    "9222",
+                                    text: Binding(
+                                        get: { String(config.cdpPort) },
+                                        set: { config.cdpPort = Int($0) ?? config.cdpPort }
+                                    )
+                                )
+                                .textFieldStyle(.roundedBorder)
+                                .frame(width: 76)
+                            }
+                            Text("Enable it with: open -a \"Google Chrome\" --args --remote-debugging-port=9222")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
                             Text("Optional in Jev mode: used for screens without accessible controls.")
                                 .font(.caption2)
                                 .foregroundStyle(.secondary)
+                            HStack {
+                                Text("Learned shortcuts: \(hintCount)")
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                                Spacer()
+                                Button("Forget learned shortcuts") {
+                                    HintStore.shared.clear()
+                                    hintCount = HintStore.shared.count
+                                }
+                                .controlSize(.small)
+                            }
                             HStack {
                                 Text(driverStatus)
                                     .font(.caption)

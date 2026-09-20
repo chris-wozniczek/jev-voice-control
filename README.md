@@ -41,6 +41,20 @@ Computer use settings let you choose the Jev step planner or DeepSeek Flash,
 and control DeepSeek thinking (off, low, or high). In Jev mode, the DeepSeek
 key is optional and is only used for fallback.
 
+### Learned shortcuts
+
+After a successful UI task, Jev remembers the app control that worked for that
+goal. Similar requests can use those learned labels as additional context
+without bypassing the live-screen decision.
+
+### Chrome DevTools fallback
+
+When a Chromium or Electron window has a thin Accessibility tree, Jev can read
+visible web controls through Chrome DevTools Protocol and use those controls
+for clicks and text entry. Enable remote debugging with
+`open -a "Google Chrome" --args --remote-debugging-port=9222`, then enable the
+Chrome DevTools option in Computer use settings.
+
 ```
 microphone ──> SFSpeechRecognizer (on-device) ──> transcript
                                                       │
