@@ -32,6 +32,7 @@ struct PlannerContext {
     var windowTitle: String? = nil
     var generatedText: String? = nil
     var snapshot: CuaSnapshot? = nil
+    var typedTextVisible: Bool? = nil
     var history: [PlannerStepRecord] = []
     var stepIndex: Int = 0
 
@@ -42,6 +43,7 @@ struct PlannerContext {
         windowTitle: String? = nil,
         generatedText: String? = nil,
         snapshot: CuaSnapshot? = nil,
+        typedTextVisible: Bool? = nil,
         history: [PlannerStepRecord] = [],
         stepIndex: Int = 0
     ) {
@@ -51,6 +53,7 @@ struct PlannerContext {
         self.windowTitle = windowTitle
         self.generatedText = generatedText
         self.snapshot = snapshot
+        self.typedTextVisible = typedTextVisible
         self.history = history
         self.stepIndex = stepIndex
     }

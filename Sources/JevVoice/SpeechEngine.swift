@@ -388,7 +388,7 @@ final class WhisperSpeechEngine: SpeechEngine {
         transcriptionInFlight = true
         transcriptionDirty = false
         let audio = samples
-        let prompt = "Jev Voice. Apps: " + vocabulary.prefix(60).joined(separator: ", ")
+        let prompt = "Jev Voice. Apps and names: " + vocabulary.prefix(60).joined(separator: ", ")
         let tokens = whisperKit.tokenizer.map {
             Array($0.encode(text: prompt).prefix(200))
         }

@@ -18,7 +18,10 @@ enum ExecutorError: Error, LocalizedError {
 
 enum Executor {
     @MainActor
-    static func execute(_ decision: Decision) async throws -> String {
+    static func execute(
+        _ decision: Decision,
+        frontmostApp: String? = nil
+    ) async throws -> String {
         switch decision.action {
         case .openApp:
             guard let name = decision.targetApp else { throw ExecutorError.missingSlot("target app") }
@@ -57,7 +60,7 @@ enum Executor {
             return try await open(url, browser: decision.targetApp)
         case .dictate:
             guard let text = decision.text else { throw ExecutorError.missingSlot("text") }
-            return dictate(text)
+            return await dictate(text, frontmostApp: frontmostApp)
         case .uiTask:
             throw ExecutorError.controlFailed("uiTask is handled by the agent")
         case .system:
@@ -244,7 +247,22 @@ enum Executor {
         return "Opened \(url.host ?? url.absoluteString)"
     }
 
-    private static func dictate(_ text: String) -> String {
+    private static func dictate(_ text: String, frontmostApp: String?) async -> String {
+        let ownBundleID = Bundle.main.bundleIdentifier
+        let application = frontmostApp.flatMap { name in
+            NSWorkspace.shared.runningApplications.first {
+                $0.localizedName?.caseInsensitiveCompare(name) == .orderedSame
+            }
+        }
+        if frontmostApp != nil, application == nil {
+            return "Nothing to type into — click where the text should go first"
+        } else if let application {
+            guard await KeyboardFocus.bringToFront(pid: application.processIdentifier) else {
+                return "Nothing to type into — click where the text should go first"
+            }
+        } else if NSWorkspace.shared.frontmostApplication?.bundleIdentifier == ownBundleID {
+            return "Nothing to type into — click where the text should go first"
+        }
         let pasteboard = NSPasteboard.general
         let saved: [NSPasteboardItem] = (pasteboard.pasteboardItems ?? []).map { item in
             let copy = NSPasteboardItem()

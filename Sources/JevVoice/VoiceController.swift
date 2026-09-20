@@ -157,9 +157,7 @@ final class VoiceController: ObservableObject {
         case .listening:
             recognizer.stop()
         case .executing:
-            AgentRunner.shared.cancel()
-            status = .idle
-            completeTask()
+            startListening()
         case .idle, .done, .error:
             startListening()
         default:
@@ -189,7 +187,8 @@ final class VoiceController: ObservableObject {
                 transcript = ""
                 suggestions = []
                 suggestionClause = ""
-                recognizer.contextualStrings = AppRegistry.shared.spokenVariants
+                recognizer.contextualStrings =
+                    AppRegistry.shared.spokenVariants + config.customVocabulary
                 try recognizer.start()
                 status = .listening
                 onListeningChanged?(true)
@@ -202,6 +201,13 @@ final class VoiceController: ObservableObject {
     }
 
     private func interpretAndExecute(_ text: String) async {
+        let normalizedText = TranscriptNormalizer.normalize(text)
+        if normalizedText != text {
+            Log.speech.info(
+                "transcript normalized from=\(text, privacy: .public) to=\(normalizedText, privacy: .public)"
+            )
+        }
+        let text = normalizedText
         status = .thinking
         onListeningChanged?(false)
         transcript = text
@@ -519,7 +525,10 @@ final class VoiceController: ObservableObject {
                    [.openApp, .switchApp, .openURL, .webSearch].contains(previousAction) {
                     try await Task.sleep(nanoseconds: 700_000_000)
                 }
-                let result = try await Executor.execute(decision)
+                let result = try await Executor.execute(
+                    decision,
+                    frontmostApp: lastExternalFrontmostApp
+                )
                 if decision.action == .dictate, decision.composes, decision.generatedText != nil {
                     let words = decision.generatedText?
                         .split(whereSeparator: { $0.isWhitespace || $0.isNewline }).count ?? 0

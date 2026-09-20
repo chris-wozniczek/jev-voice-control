@@ -83,8 +83,9 @@ final class ClauseSplitterCandidateTests: XCTestCase {
     }
 
     func testStripsTrailingEndWordAndPunctuation() {
-        XCTAssertEqual(ClauseSplitter.stripTrailingEndWord("open chrome, go!"), "open chrome")
+        XCTAssertEqual(ClauseSplitter.stripTrailingEndWord("open chrome, go!"), "open chrome, go!")
         XCTAssertEqual(ClauseSplitter.stripTrailingEndWord("open chrome DO IT."), "open chrome")
+        XCTAssertEqual(ClauseSplitter.stripTrailingEndWord("open chrome that's it."), "open chrome")
         XCTAssertEqual(ClauseSplitter.stripTrailingEndWord("open chrome"), "open chrome")
     }
 
