@@ -10,8 +10,20 @@ public enum ExecutionPolicy {
     public static func verdict(
         for decisions: [Decision],
         alwaysConfirm: Bool,
-        previewGeneratedText: Bool = false
+        previewGeneratedText: Bool = false,
+        policy: SafetyPolicy? = nil,
+        transcript: String? = nil
     ) -> Verdict {
+        if let policyVerdict = policy?.verdict(
+            for: transcript ?? decisions.map(\.clause).joined(separator: " ")
+        ) {
+            switch policyVerdict {
+            case .reject(let reason):
+                return .reject(reason: reason)
+            case .confirm(let reason):
+                return .confirm(reason: reason)
+            }
+        }
         if decisions.contains(where: { $0.riskTier == .destructive }) {
             return .confirm(reason: "This sounds hard to undo — confirm?")
         }

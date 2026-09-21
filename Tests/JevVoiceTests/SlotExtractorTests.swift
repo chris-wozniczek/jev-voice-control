@@ -41,6 +41,24 @@ final class SlotExtractorTests: XCTestCase {
         )
     }
 
+    func testFallbackSearchQueryStripsLeadingVerbAndArticle() {
+        XCTAssertEqual(
+            SlotExtractor.fallbackSearchQuery(from: "Check the last Juventus game"),
+            "last Juventus game"
+        )
+    }
+
+    func testFallbackSearchQueryKeepsQuestionWhole() {
+        XCTAssertEqual(
+            SlotExtractor.fallbackSearchQuery(from: "Who is Juventus coach"),
+            "Who is Juventus coach"
+        )
+    }
+
+    func testFallbackSearchQueryRejectsShortRemainder() {
+        XCTAssertNil(SlotExtractor.fallbackSearchQuery(from: "Find"))
+    }
+
     func testDictationText() {
         XCTAssertEqual(SlotExtractor.dictationText(from: "type hello world"), "hello world")
     }

@@ -65,6 +65,27 @@ struct SettingsView: View {
                         .controlSize(.small)
                     }
 
+                    section("Safety", systemImage: "shield") {
+                        Text(config.safetyPolicyPath ?? "No policy loaded")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .textSelection(.enabled)
+                        HStack {
+                            Button("Open policy file") {
+                                guard let path = config.safetyPolicyPath else { return }
+                                NSWorkspace.shared.open(URL(fileURLWithPath: path))
+                            }
+                            .controlSize(.small)
+                            Button("Reveal in Finder") {
+                                guard let path = config.safetyPolicyPath else { return }
+                                NSWorkspace.shared.activateFileViewerSelecting([
+                                    URL(fileURLWithPath: path)
+                                ])
+                            }
+                            .controlSize(.small)
+                        }
+                    }
+
                     section("Computer use", systemImage: "macwindow") {
                         VStack(alignment: .leading, spacing: 8) {
                             SecureField("DeepSeek API key", text: $config.deepSeekAPIKey)
@@ -382,6 +403,9 @@ struct SettingsView: View {
                     Text("Hold to talk").tag(ListeningMode.hold)
                 }
                 if config.listeningMode == .toggle {
+                    Toggle("Smart end of speech (Jev)", isOn: $config.endOfTurnJudgeEnabled)
+                        .toggleStyle(.switch)
+                        .controlSize(.small)
                     HStack {
                         Text("Silence timeout")
                         Slider(value: $config.silenceTimeout, in: 1...5, step: 0.5)

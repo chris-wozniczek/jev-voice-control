@@ -12,6 +12,10 @@ final class SpeechAnalyzerEngine: SpeechEngine {
     var onError: ((Error) -> Void)?
     var onListening: (() -> Void)?
     var onSilence: (() -> Void)?
+    var onSpeechPause: ((String) -> Void)?
+    var silenceTimeoutOverride: TimeInterval? {
+        didSet { fallback?.silenceTimeoutOverride = silenceTimeoutOverride }
+    }
     var onStatus: ((String?) -> Void)?
     var vocabulary: [String] = []
 
@@ -40,6 +44,7 @@ final class SpeechAnalyzerEngine: SpeechEngine {
     private var lastSpeechAt = Date()
     private var speechStarted = false
     private var didSignalSilence = false
+    private var didSignalPause = false
     private var didEmitFinal = false
     private var finishing = false
     private var generation = 0
@@ -61,6 +66,8 @@ final class SpeechAnalyzerEngine: SpeechEngine {
             fallback.onError = onError
             fallback.onListening = onListening
             fallback.onSilence = onSilence
+            fallback.onSpeechPause = onSpeechPause
+            fallback.silenceTimeoutOverride = silenceTimeoutOverride
             fallback.onStatus = onStatus
             fallback.vocabulary = vocabulary
             self.fallback = fallback
@@ -76,6 +83,8 @@ final class SpeechAnalyzerEngine: SpeechEngine {
         lastSpeechAt = Date()
         speechStarted = false
         didSignalSilence = false
+        didSignalPause = false
+        silenceTimeoutOverride = nil
         didEmitFinal = false
         finishing = false
         let stream = AsyncStream<AnalyzerInput> { continuation in
@@ -215,6 +224,8 @@ final class SpeechAnalyzerEngine: SpeechEngine {
                     let text = String(result.text.characters)
                     if !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                         self.lastSpeechAt = Date()
+                        self.didSignalPause = false
+                        self.silenceTimeoutOverride = nil
                     }
                     if result.isFinal {
                         self.finalized = Self.assembleFinal(
@@ -252,9 +263,21 @@ final class SpeechAnalyzerEngine: SpeechEngine {
                     if result.speechDetected {
                         self.speechStarted = true
                         self.lastSpeechAt = Date()
-                    } else if self.speechStarted,
-                              Date().timeIntervalSince(self.lastSpeechAt)
-                                >= Config.shared.silenceTimeout {
+                    }
+                    if self.speechStarted,
+                       Date().timeIntervalSince(self.lastSpeechAt) >= HearingSettings.pauseProbeDelay,
+                       !self.didSignalPause,
+                       !Self.assembleFinal(finalized: self.finalized, volatile: self.volatile)
+                            .trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        self.didSignalPause = true
+                        self.onSpeechPause?(Self.assembleFinal(
+                            finalized: self.finalized,
+                            volatile: self.volatile
+                        ))
+                    }
+                    if self.speechStarted,
+                       Date().timeIntervalSince(self.lastSpeechAt)
+                            >= (self.silenceTimeoutOverride ?? Config.shared.silenceTimeout) {
                         self.signalSilence()
                     }
                 }
@@ -307,6 +330,8 @@ final class SpeechAnalyzerEngine: SpeechEngine {
                 if SpeechEnergy.isVoiced(rms: rms, noiseFloor: 0.002) {
                     self.speechStarted = true
                     self.lastSpeechAt = Date()
+                    self.didSignalPause = false
+                    self.silenceTimeoutOverride = nil
                 }
                 self.inputContinuation?.yield(AnalyzerInput(buffer: converted))
             }
@@ -378,9 +403,19 @@ final class SpeechAnalyzerEngine: SpeechEngine {
             while !Task.isCancelled {
                 try? await Task.sleep(for: .milliseconds(100))
                 guard let self, self.generation == generation else { return }
-                guard self.speechStarted,
-                      Date().timeIntervalSince(self.lastSpeechAt)
-                        >= Config.shared.silenceTimeout * 2 else {
+                guard self.speechStarted else { continue }
+                if !self.didSignalPause,
+                       !Self.assembleFinal(finalized: self.finalized, volatile: self.volatile)
+                            .trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                       Date().timeIntervalSince(self.lastSpeechAt) >= HearingSettings.pauseProbeDelay {
+                        self.didSignalPause = true
+                        self.onSpeechPause?(Self.assembleFinal(
+                            finalized: self.finalized,
+                            volatile: self.volatile
+                        ))
+                    }
+                guard Date().timeIntervalSince(self.lastSpeechAt)
+                        >= (self.silenceTimeoutOverride ?? Config.shared.silenceTimeout) else {
                     continue
                 }
                 self.signalSilence()
@@ -431,6 +466,8 @@ final class SpeechAnalyzerEngine: SpeechEngine {
     var onError: ((Error) -> Void)?
     var onListening: (() -> Void)?
     var onSilence: (() -> Void)?
+    var onSpeechPause: ((String) -> Void)?
+    var silenceTimeoutOverride: TimeInterval?
     var onStatus: ((String?) -> Void)?
     var vocabulary: [String] = []
 
@@ -446,6 +483,8 @@ final class SpeechAnalyzerEngine: SpeechEngine {
         fallback.onError = onError
         fallback.onListening = onListening
         fallback.onSilence = onSilence
+        fallback.onSpeechPause = onSpeechPause
+        fallback.silenceTimeoutOverride = silenceTimeoutOverride
         fallback.onStatus = onStatus
         fallback.vocabulary = vocabulary
         self.fallback = fallback

@@ -80,6 +80,17 @@ final class AgentTests: XCTestCase {
     }
 
     @MainActor
+    func testOrderedVocabularyIncludesSiteNamesAndAliases() {
+        let vocabulary = SpeechRecognizer.orderedVocabulary(
+            extra: [],
+            appNames: [],
+            siteNames: ["X", "x.com"]
+        )
+        XCTAssertTrue(vocabulary.contains("X"))
+        XCTAssertTrue(vocabulary.contains("x.com"))
+    }
+
+    @MainActor
     func testRoutingHeuristic() {
         let safe = ExecutionPolicy.Verdict.run
         for transcript in [

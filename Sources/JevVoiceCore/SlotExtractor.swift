@@ -36,6 +36,40 @@ public enum SlotExtractor {
         return query.isEmpty ? nil : query
     }
 
+    public static func fallbackSearchQuery(from clause: String) -> String? {
+        let trimmed = clause.trimmingCharacters(in: .whitespacesAndNewlines)
+        let words = trimmed.split(whereSeparator: \.isWhitespace)
+        guard words.count >= 2 else { return nil }
+        let first = words.first.map(String.init)?.lowercased() ?? ""
+        if ["who", "what", "when", "where", "how"].contains(first) {
+            return trimmed
+        }
+        let triggers = [
+            "check out", "tell me", "find out", "search for", "look up",
+            "check", "google", "search", "find", "look at",
+        ]
+        let lowered = trimmed.lowercased()
+        guard let trigger = triggers.sorted(by: { $0.count > $1.count }).first(where: {
+            lowered.range(of: "^" + NSRegularExpression.escapedPattern(for: $0) + #"\b"#,
+                          options: .regularExpression) != nil
+        }) else {
+            return nil
+        }
+        var remainder = String(trimmed.dropFirst(trigger.count))
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let articles = ["the", "a", "an"]
+        if let article = articles.first(where: {
+            remainder.range(
+                of: "^" + $0 + #"\b"#,
+                options: [.regularExpression, .caseInsensitive]
+            ) != nil
+        }) {
+            remainder = String(remainder.dropFirst(article.count))
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        return remainder.split(whereSeparator: \.isWhitespace).count >= 2 ? remainder : nil
+    }
+
     public static func searchBrowser(from clause: String) -> String? {
         guard let match = trailingSearchEngineMatch(in: clause) else { return nil }
         let phrase = String(clause[match.appRange]).lowercased()

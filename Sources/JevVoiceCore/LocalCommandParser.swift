@@ -35,10 +35,11 @@ public enum LocalCommandParser {
         }
 
         if trimmed.range(
-            of: #"^(search(?:\s+for)?|google|look\s+up)\b"#,
+            of: #"^(check(?:\s+out)?|tell\s+me|find(?:\s+out)?|google|search(?:\s+for)?|look(?:\s+at|\s+up)?|who|what|when|where|how)\b"#,
             options: [.regularExpression, .caseInsensitive]
         ) != nil,
-           let query = SlotExtractor.searchQuery(from: trimmed) {
+           let query = SlotExtractor.searchQuery(from: trimmed)
+                ?? SlotExtractor.fallbackSearchQuery(from: trimmed) {
             return Decision(
                 clause: trimmed, action: .webSearch,
                 targetApp: SlotExtractor.searchBrowser(from: trimmed),

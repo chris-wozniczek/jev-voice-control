@@ -189,8 +189,13 @@ final class VoiceController: ObservableObject {
                 suggestionClause = ""
                 recognizer.contextualStrings = SpeechRecognizer.orderedVocabulary(
                     extra: config.customVocabulary,
-                    appNames: AppRegistry.shared.spokenVariants
+                    appNames: AppRegistry.shared.spokenVariants,
+                    siteNames: WebSiteRegistry.shared.sites.flatMap {
+                        let shortHost = String($0.host.split(separator: ".").dropLast().joined(separator: "."))
+                        return [$0.host, shortHost, shortHost.capitalized] + $0.names
+                    }
                 )
+                recognizer.frontmostApp = lastExternalFrontmostApp
                 try recognizer.start()
                 status = .listening
                 onListeningChanged?(true)
@@ -259,10 +264,13 @@ final class VoiceController: ObservableObject {
         let verdict = ExecutionPolicy.verdict(
             for: decisions,
             alwaysConfirm: config.alwaysConfirm,
-            previewGeneratedText: config.previewGeneratedText
+            previewGeneratedText: config.previewGeneratedText,
+            policy: config.safetyPolicy,
+            transcript: text
         )
         Log.command.info("verdict=\(String(describing: verdict), privacy: .public)")
-        let routesToAgent = shouldUseComputerAgent(
+        let policyVerdict = config.safetyPolicy?.verdict(for: text)
+        let routesToAgent = policyVerdict == nil && shouldUseComputerAgent(
             transcript: text, decisions: decisions, verdict: verdict, error: interpretationError
         )
         Log.command.info("route=\(routesToAgent ? "agent" : "local", privacy: .public)")

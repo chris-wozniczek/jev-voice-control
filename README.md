@@ -38,7 +38,9 @@ streaming on macOS 26, and Whisper. Apple SpeechAnalyzer assets are preloaded at
 launch when available. Whisper's language code is configurable in Settings ›
 Hearing; leave it blank for automatic language detection. When Whisper is
 selected, its model is loaded at app launch so the first tap can start listening
-immediately. Whisper uses audio energy to detect the end of speech.
+immediately. Whisper uses audio energy to detect the end of speech. Smart end
+of speech can ask Jev whether a short pause ends the command, while retaining
+the configured silence timeout as a hard cap.
 
 ## How it works
 
@@ -85,6 +87,8 @@ the prose. Generated text is previewed before typing by default.
 
 Sites are resolved from the bundled `web-sites.json` registry, with optional
 user overrides at `~/Library/Application Support/Jev Voice/web-sites.json`.
+Search commands also fall back to extracting a query from phrases such as
+“check the last Juventus game” when the structured query slot is empty.
 Choose the default browser in Settings › Computer use; a browser named in the
 command overrides it. Site workflows open the requested host before the
 generic computer-use loop starts.
@@ -94,6 +98,15 @@ for the requested site, open X, and continue through the normal observe,
 choose, type, and verify flow. The bundled x.com shortcut can press `n` once
 to open the composer when no text field is visible. Post, Send, Publish, Tweet,
 and Reply controls require confirmation before submission.
+
+### Safety policy
+
+The bundled `Resources/policy.json` blocks shell, payment, credential, and
+irreversible file-operation phrases, and asks for confirmation before send,
+submit, post, publish, tweet, reply, delete, remove, quit, or close-all
+commands. A user override at
+`~/Library/Application Support/Jev Voice/policy.json` replaces the bundled
+policy. Settings › Safety shows the loaded policy and can open or reveal it.
 
 ```
 microphone ──> SFSpeechRecognizer (on-device) ──> transcript

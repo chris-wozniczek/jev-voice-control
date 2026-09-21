@@ -12,6 +12,8 @@ protocol SpeechEngine: AnyObject {
     var onError: ((Error) -> Void)? { get set }
     var onListening: (() -> Void)? { get set }
     var onSilence: (() -> Void)? { get set }
+    var onSpeechPause: ((String) -> Void)? { get set }
+    var silenceTimeoutOverride: TimeInterval? { get set }
     var onStatus: ((String?) -> Void)? { get set }
     var vocabulary: [String] { get set }
     func start() throws
@@ -226,6 +228,8 @@ final class AppleSpeechEngine: NSObject, SpeechEngine {
     var onError: ((Error) -> Void)?
     var onListening: (() -> Void)?
     var onSilence: (() -> Void)?
+    var onSpeechPause: ((String) -> Void)?
+    var silenceTimeoutOverride: TimeInterval?
     var onStatus: ((String?) -> Void)?
     var vocabulary: [String] = []
 
@@ -234,6 +238,9 @@ final class AppleSpeechEngine: NSObject, SpeechEngine {
     private var request: SFSpeechAudioBufferRecognitionRequest?
     private var task: SFSpeechRecognitionTask?
     private var transcript = ""
+    private var lastPartialAt = Date()
+    private var didSignalPause = false
+    private var silenceTask: Task<Void, Never>?
 
     func start() throws {
         cancel()
@@ -242,6 +249,9 @@ final class AppleSpeechEngine: NSObject, SpeechEngine {
             throw SpeechEngineError.message("Speech recognizer unavailable")
         }
         self.recognizer = recognizer
+        lastPartialAt = Date()
+        didSignalPause = false
+        silenceTimeoutOverride = nil
         let request = SFSpeechAudioBufferRecognitionRequest()
         request.shouldReportPartialResults = true
         request.contextualStrings = vocabulary
@@ -273,6 +283,9 @@ final class AppleSpeechEngine: NSObject, SpeechEngine {
                     let text = result.bestTranscription.formattedString
                     self.transcript = text
                     if !text.isEmpty {
+                        self.lastPartialAt = Date()
+                        self.didSignalPause = false
+                        self.silenceTimeoutOverride = nil
                         self.onPartial?(text)
                     }
                     if result.isFinal {
@@ -281,6 +294,24 @@ final class AppleSpeechEngine: NSObject, SpeechEngine {
                 }
                 if let error {
                     self.onError?(error)
+                }
+            }
+        }
+        silenceTask = Task { @MainActor [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .milliseconds(100))
+                guard let self else { return }
+                let elapsed = Date().timeIntervalSince(self.lastPartialAt)
+                if !self.didSignalPause,
+                   !self.transcript.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                   elapsed >= HearingSettings.pauseProbeDelay {
+                    self.didSignalPause = true
+                    self.onSpeechPause?(self.transcript)
+                }
+                let timeout = self.silenceTimeoutOverride ?? Config.shared.silenceTimeout
+                if !self.transcript.isEmpty, elapsed >= timeout {
+                    self.onSilence?()
+                    return
                 }
             }
         }
@@ -298,6 +329,8 @@ final class AppleSpeechEngine: NSObject, SpeechEngine {
     }
 
     private func stopEngine() {
+        silenceTask?.cancel()
+        silenceTask = nil
         audioEngine.stop()
         audioEngine.inputNode.removeTap(onBus: 0)
         request?.endAudio()
@@ -316,6 +349,8 @@ final class WhisperSpeechEngine: SpeechEngine {
     var onError: ((Error) -> Void)?
     var onListening: (() -> Void)?
     var onSilence: (() -> Void)?
+    var onSpeechPause: ((String) -> Void)?
+    var silenceTimeoutOverride: TimeInterval?
     var onStatus: ((String?) -> Void)?
     var vocabulary: [String] = []
 
@@ -343,6 +378,7 @@ final class WhisperSpeechEngine: SpeechEngine {
     private var samplesAtLastPass = 0
     private var lastPassText = ""
     private var didSignalSilence = false
+    private var didSignalPause = false
 
     init(store: WhisperModelStore? = nil) {
         self.store = store ?? .shared
@@ -369,6 +405,8 @@ final class WhisperSpeechEngine: SpeechEngine {
         samplesAtLastPass = 0
         lastPassText = ""
         didSignalSilence = false
+        didSignalPause = false
+        silenceTimeoutOverride = nil
         generation += 1
         let currentGeneration = generation
         Log.speech.info("Whisper model loading name=\(self.store.selected.id, privacy: .public)")
@@ -404,10 +442,17 @@ final class WhisperSpeechEngine: SpeechEngine {
                     self.silenceTask = Task { [weak self] in
                         while !Task.isCancelled {
                             try? await Task.sleep(nanoseconds: 100_000_000)
-                            guard !Task.isCancelled, let self,
-                                  self.speechStarted,
-                                  !self.didSignalSilence,
-                                  Date().timeIntervalSince(self.lastVoicedAt) >= Config.shared.silenceTimeout
+                            guard !Task.isCancelled, let self, self.speechStarted else { continue }
+                            if !self.didSignalPause,
+                               !self.lastPassText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                               Date().timeIntervalSince(self.lastVoicedAt) >= HearingSettings.pauseProbeDelay {
+                                self.didSignalPause = true
+                                self.onSpeechPause?(self.lastPassText)
+                            }
+                            guard !self.didSignalSilence,
+                                  Date().timeIntervalSince(self.lastVoicedAt) >= (
+                                      self.silenceTimeoutOverride ?? Config.shared.silenceTimeout
+                                  )
                             else { continue }
                             self.didSignalSilence = true
                             self.onSilence?()
@@ -493,6 +538,8 @@ final class WhisperSpeechEngine: SpeechEngine {
         samplesAtLastPass = 0
         lastPassText = ""
         didSignalSilence = false
+        didSignalPause = false
+        silenceTimeoutOverride = nil
     }
 
     private func startAudio() throws {
@@ -575,6 +622,8 @@ final class WhisperSpeechEngine: SpeechEngine {
             voicedSamples += floats.count
             lastVoicedAt = Date()
             samplesAtLastVoice = samples.count
+            didSignalPause = false
+            silenceTimeoutOverride = nil
             if voicedSamples >= Int(0.2 * 16_000) {
                 speechStarted = true
             }
