@@ -37,6 +37,8 @@ final class SpeechAnalyzerEngine: SpeechEngine {
     private var analyzerTask: Task<Void, Never>?
     private var transcriberTask: Task<Void, Never>?
     private var detectorTask: Task<Void, Never>?
+    private var finishTask: Task<Void, Never>?
+    private var finalSilenceTask: Task<Void, Never>?
     private var fallback: AppleSpeechEngine?
     private var finalized = ""
     private var volatile = ""
@@ -112,20 +114,31 @@ final class SpeechAnalyzerEngine: SpeechEngine {
             return
         }
         finishing = true
-        audioEngine.stop()
-        audioEngine.inputNode.removeTap(onBus: 0)
-        inputContinuation?.finish()
-        inputContinuation = nil
         fallbackSilenceTask?.cancel()
         fallbackSilenceTask = nil
+        finalSilenceTask?.cancel()
+        finalSilenceTask = nil
         guard let analyzer else {
+            if setupTask != nil {
+                Log.speech.info("analyzer finish queued while setup loads")
+                return
+            }
             if !didEmitFinal {
                 didEmitFinal = true
                 onFinal?(Self.assembleFinal(finalized: finalized, volatile: volatile))
             }
             return
         }
-        Task { @MainActor [weak self] in
+        audioEngine.stop()
+        audioEngine.inputNode.removeTap(onBus: 0)
+        inputContinuation?.finish()
+        inputContinuation = nil
+        finishAnalyzer(analyzer)
+    }
+
+    private func finishAnalyzer(_ analyzer: SpeechAnalyzer) {
+        guard finishTask == nil else { return }
+        finishTask = Task { @MainActor [weak self] in
             guard let self else { return }
             do {
                 try await analyzer.finalizeAndFinishThroughEndOfInput()
@@ -134,6 +147,7 @@ final class SpeechAnalyzerEngine: SpeechEngine {
             } catch {
                 self.onError?(error)
             }
+            self.finishTask = nil
         }
     }
 
@@ -147,6 +161,10 @@ final class SpeechAnalyzerEngine: SpeechEngine {
         transcriberTask = nil
         detectorTask?.cancel()
         detectorTask = nil
+        finishTask?.cancel()
+        finishTask = nil
+        finalSilenceTask?.cancel()
+        finalSilenceTask = nil
         fallbackSilenceTask?.cancel()
         fallbackSilenceTask = nil
         fallback?.cancel()
@@ -222,6 +240,8 @@ final class SpeechAnalyzerEngine: SpeechEngine {
                     guard let self, self.generation == generation else { return }
                     let text = String(result.text.characters)
                     if !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        self.finalSilenceTask?.cancel()
+                        self.finalSilenceTask = nil
                         self.lastSpeechAt = Date()
                         self.didSignalPause = false
                         self.silenceTimeoutOverride = nil
@@ -236,6 +256,22 @@ final class SpeechAnalyzerEngine: SpeechEngine {
                         Log.speech.info(
                             "analyzer final=\(text, privacy: .public) elapsed=\(Date().timeIntervalSince(self.lastAudioAt), privacy: .public)"
                         )
+                        if Config.shared.listeningMode == .toggle {
+                            self.finalSilenceTask?.cancel()
+                            self.finalSilenceTask = Task { @MainActor [weak self] in
+                                do {
+                                    try await Task.sleep(for: .milliseconds(600))
+                                } catch {
+                                    return
+                                }
+                                guard let self,
+                                      self.generation == generation,
+                                      !self.finishing else { return }
+                                Log.speech.info("analyzer final-triggered silence")
+                                self.signalSilence()
+                                self.finalSilenceTask = nil
+                            }
+                        }
                     } else {
                         self.volatile = text
                         self.onPartial?(Self.assembleFinal(
@@ -294,6 +330,13 @@ final class SpeechAnalyzerEngine: SpeechEngine {
                 guard let self, self.generation == generation else { return }
                 self.onError?(error)
             }
+        }
+        if finishing {
+            audioEngine.stop()
+            audioEngine.inputNode.removeTap(onBus: 0)
+            inputContinuation?.finish()
+            inputContinuation = nil
+            finishAnalyzer(analyzer)
         }
     }
 

@@ -59,6 +59,24 @@ final class JevStepPlannerTests: XCTestCase {
     }
 
     @MainActor
+    func testOCRCandidateRanksAheadOfUnmatchedInteractiveElements() async throws {
+        let fake = FakeJev(answer: .choice(choice: "e1", confidence: 0.9, probabilities: ["e1": 0.9]))
+        let planner = JevStepPlanner(client: fake, canEscalate: false)
+        let buttons = (1...24).map {
+            CuaElement(token: "ax:\($0)", role: "AXButton", label: "Button \($0)", value: nil)
+        }
+        let turn = try await planner.next(PlannerContext(
+            goal: "Open a new session",
+            targetApp: "Devin",
+            snapshot: snapshot(buttons + [
+                CuaElement(token: "ocr:1", role: "AXStaticText", label: "New session", value: nil),
+            ])
+        ))
+        XCTAssertEqual(turn.toolCalls.first?.name, "click")
+        XCTAssertEqual(turn.toolCalls.first?.arguments["element_token"]?.stringValue, "ocr:1")
+    }
+
+    @MainActor
     func testCreationClickWithChangedSnapshotReturnsDoneWithoutSecondClick() async throws {
         let fake = FakeJev(answer: .choice(choice: "e1", confidence: 0.9, probabilities: ["e1": 0.9]))
         let planner = JevStepPlanner(client: fake, canEscalate: false)

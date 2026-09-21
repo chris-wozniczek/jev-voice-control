@@ -29,6 +29,27 @@ final class ClauseSplitterTests: XCTestCase {
             ["open chrome", "go to google.com"]
         )
     }
+
+    func testTitlePayloadKeepsCommaContentTogether() {
+        XCTAssertEqual(
+            ClauseSplitter.split("Change the title to hi, hello"),
+            ["Change the title to hi, hello"]
+        )
+    }
+
+    func testSearchPayloadSwallowsFollowingCommands() {
+        XCTAssertEqual(
+            ClauseSplitter.split("search for who is the Juventus coach, then open Notes"),
+            ["search for who is the Juventus coach, then open Notes"]
+        )
+    }
+
+    func testOrdinaryCommandsStillSplitAtComma() {
+        XCTAssertEqual(
+            ClauseSplitter.split("open Notes and then create a new note"),
+            ["open Notes", "create a new note"]
+        )
+    }
 }
 
 final class ClauseSplitterNewVerbTests: XCTestCase {

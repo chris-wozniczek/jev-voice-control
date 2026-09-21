@@ -316,6 +316,44 @@ enum AXTreeReader {
         return snapshot(nodes: nodes)
     }
 
+    static func wake(pid: Int, windowFrame: CGRect?) -> (before: Int, after: Int, method: String)? {
+        guard let root = window(pid: pid_t(pid), frame: windowFrame) else { return nil }
+        let beforeNodes = walk(
+            AXElementNode(element: root),
+            deadline: Date().addingTimeInterval(0.3)
+        ) ?? []
+        let before = beforeNodes.filter { interactiveRoles.contains($0.role) }.count
+        let background = beforeNodes
+            .filter {
+                ["AXGroup", "AXWebArea", "AXScrollArea"].contains($0.role)
+                    && $0.label.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                    && ($0.node.frame?.width ?? 0) > 0
+                    && ($0.node.frame?.height ?? 0) > 0
+            }
+            .max {
+                ($0.node.frame?.width ?? 0) * ($0.node.frame?.height ?? 0)
+                    < ($1.node.frame?.width ?? 0) * ($1.node.frame?.height ?? 0)
+            }
+        var method = "mouse"
+        if let background,
+           AXUIElementPerformAction(background.node.element, kAXPressAction as CFString) == .success {
+            method = "axpress"
+        }
+        if let windowFrame {
+            postMouseMoved(at: windowFrame.center)
+        }
+        Thread.sleep(forTimeInterval: 0.3)
+        let afterNodes = walk(
+            AXElementNode(element: root),
+            deadline: Date().addingTimeInterval(1.0)
+        ) ?? beforeNodes
+        let after = afterNodes.filter { interactiveRoles.contains($0.role) }.count
+        Log.agent.info(
+            "axtree wake before=\(before, privacy: .public) after=\(after, privacy: .public) method=\(method, privacy: .public)"
+        )
+        return (before, after, method)
+    }
+
     static func shouldRewalk(interactiveCount: Int, frame: CGRect?) -> Bool {
         guard let frame else { return false }
         let threshold = max(10, Int(frame.width * frame.height / 150_000))
@@ -421,6 +459,16 @@ enum AXTreeReader {
             height = Int((frame?.size.height ?? 0).rounded())
         }
     }
+
+    private static func postMouseMoved(at point: CGPoint) {
+        guard let event = CGEvent(
+            mouseEventSource: nil,
+            mouseType: .mouseMoved,
+            mouseCursorPosition: point,
+            mouseButton: .left
+        ) else { return }
+        event.post(tap: .cghidEventTap)
+    }
 }
 
 private extension CGRect {
@@ -430,6 +478,12 @@ private extension CGRect {
 enum CGEventClicker {
     static func click(at point: CGPoint) {
         guard let source = CGEventSource(stateID: .hidSystemState),
+              let moved = CGEvent(
+                  mouseEventSource: source,
+                  mouseType: .mouseMoved,
+                  mouseCursorPosition: point,
+                  mouseButton: .left
+              ),
               let down = CGEvent(
                   mouseEventSource: source,
                   mouseType: .leftMouseDown,
@@ -444,6 +498,8 @@ enum CGEventClicker {
               ) else {
             return
         }
+        moved.post(tap: .cghidEventTap)
+        Thread.sleep(forTimeInterval: 0.03)
         down.post(tap: .cghidEventTap)
         up.post(tap: .cghidEventTap)
     }

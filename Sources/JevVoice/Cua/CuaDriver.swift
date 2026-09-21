@@ -92,11 +92,33 @@ struct CuaElement: Equatable {
     let value: String?
 }
 
+enum CuaSnapshotSource: Equatable {
+    case unknown
+    case ax
+    case cdp
+    case cua
+}
+
 struct CuaSnapshot {
     let snapshotId: String
     let treeMarkdown: String
     let elements: [CuaElement]
     let image: Data?
+    let source: CuaSnapshotSource
+
+    init(
+        snapshotId: String,
+        treeMarkdown: String,
+        elements: [CuaElement],
+        image: Data?,
+        source: CuaSnapshotSource = .unknown
+    ) {
+        self.snapshotId = snapshotId
+        self.treeMarkdown = treeMarkdown
+        self.elements = elements
+        self.image = image
+        self.source = source
+    }
 
     func element(token: String) -> CuaElement? {
         elements.first { $0.token == token }

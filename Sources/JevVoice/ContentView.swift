@@ -354,12 +354,12 @@ struct ContentView: View {
                 Text(controller.hotKeyRegistered ? "⌥ Space" : "⌥Space is taken")
                     .font(.caption.weight(.medium).monospaced())
                     .foregroundStyle(controller.hotKeyRegistered ? Color.secondary : Color.orange)
-                Text(controller.config.listeningMode == .hold
-                     ? "release to run"
-                     : "say “go” or pause to run")
+        Text(controller.config.listeningMode == .hold
+             ? "Hold ⌥Space, speak, release to send"
+             : "say “go” or pause to run")
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
-                Text(controller.config.listeningMode == .hold ? "hold to talk" : "tap to talk")
+        Text(controller.config.listeningMode == .hold ? "hold to talk" : "tap to talk")
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
             }
