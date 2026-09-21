@@ -441,37 +441,16 @@ final class JevStepPlanner: ActionPlanner {
             let hasOCR = snapshot.elements.contains { $0.token.hasPrefix("ocr:") }
             if canEscalate, !hasOCR, !forcedOCRRequested {
                 forcedOCRRequested = true
-                return PlannerTurn(
-                    assistant: DeepSeekMessage(
-                        role: "assistant",
-                        content: nil,
-                        name: nil,
-                        toolCallID: nil,
-                        toolCalls: [
-                            DeepSeekToolCall(
-                                id: "jev-\(ctx.stepIndex + 1)",
-                                name: "observe",
-                                arguments: [
-                                    "app": ctx.targetApp.map(JSONValue.string) ?? .null,
-                                    "screenshot": .bool(false),
-                                    "force_ocr": .bool(true),
-                                ]
-                            ),
-                        ]
-                    ),
-                    toolCalls: [
-                        DeepSeekToolCall(
-                            id: "jev-\(ctx.stepIndex + 1)",
-                            name: "observe",
-                            arguments: [
-                                "app": ctx.targetApp.map(JSONValue.string) ?? .null,
-                                "screenshot": .bool(false),
-                                "force_ocr": .bool(true),
-                            ]
-                        ),
-                    ],
-                    forceOCR: true
+                let observeCall = DeepSeekToolCall(
+                    id: "jev-\(ctx.stepIndex + 1)",
+                    name: "observe",
+                    arguments: [
+                        "app": ctx.targetApp.map(JSONValue.string) ?? .null,
+                        "screenshot": .bool(false),
+                        "force_ocr": .bool(true),
+                    ]
                 )
+                return makeTurn(call: observeCall, forceOCR: true)
             }
             if canEscalate { return escalation("Jev could not find a control to advance the goal") }
             return makeFailure(
@@ -576,7 +555,7 @@ final class JevStepPlanner: ActionPlanner {
         }
     }
 
-    private func makeTurn(call: DeepSeekToolCall) -> PlannerTurn {
+    private func makeTurn(call: DeepSeekToolCall, forceOCR: Bool = false) -> PlannerTurn {
         PlannerTurn(
             assistant: DeepSeekMessage(
                 role: "assistant",
@@ -585,7 +564,8 @@ final class JevStepPlanner: ActionPlanner {
                 toolCallID: nil,
                 toolCalls: [call]
             ),
-            toolCalls: [call]
+            toolCalls: [call],
+            forceOCR: forceOCR
         )
     }
 

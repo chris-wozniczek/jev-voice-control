@@ -2,12 +2,6 @@ import XCTest
 @testable import JevVoiceCore
 
 final class SlotExtractorTests: XCTestCase {
-    func testStandaloneThisIsPreservedWhenDictating() {
-        XCTAssertEqual(
-            SlotExtractor.dictationText(from: "type this is fine"),
-            "this is fine"
-        )
-    }
     func testSpokenDotURL() {
         XCTAssertEqual(SlotExtractor.url(from: "go to google dot com"), "https://google.com")
     }

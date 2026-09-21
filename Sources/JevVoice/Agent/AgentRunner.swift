@@ -1328,16 +1328,27 @@ final class AgentRunner: ObservableObject {
     }
 
     func isRisky(token: String?, key: String?) -> Bool {
-        let labels = token.flatMap { lastSnapshot?.element(token: $0)?.label }
-            .map { [$0] }
-            ?? (lastSnapshot?.elements.map(\.label) ?? [])
-        if labels.contains(where: { AgentRisk.matchesDestructiveWord($0.lowercased()) }) {
-            return true
-        }
+        let label = token.flatMap { lastSnapshot?.element(token: $0)?.label }?.lowercased() ?? ""
+        if AgentRisk.matchesDestructiveWord(label) { return true }
         guard let key = key?.lowercased(), key == "return" || key == "enter" else { return false }
-            return labels.contains {
-                AgentRisk.matchesDestructiveWord($0.lowercased())
-            }
+        let latestLabel = (lastSnapshot?.elements.last?.label ?? "").lowercased()
+        return AgentRisk.matchesDestructiveWord(latestLabel)
+    }
+
+    private func confirmSubmit(goal: String) async throws {
+        guard AgentRisk.matchesDestructiveGoal(goal)
+                || AgentRisk.matchesDestructiveWord(goal) else {
+            return
+        }
+        if !steps.isEmpty {
+            steps[steps.count - 1].result = .pendingConfirm
+        }
+        pendingConfirmation = true
+        let allowed = await requestConfirmation("Send it?")
+        pendingConfirmation = false
+        guard allowed else {
+            throw AgentError.api("user declined; choose another approach or fail")
+        }
     }
 
     private func number(_ value: JSONValue?) -> Double? {
@@ -1433,7 +1444,7 @@ final class AgentRunner: ObservableObject {
             let logKey = attempt.logKey
             let key = attempt.key
             let modifiers = attempt.modifiers
-            try await confirmIfRisky(tool: "submitKey", token: nil, key: key)
+            try await confirmSubmit(goal: goal)
             guard await KeyboardFocus.bringToFront(pid: pid_t(pid)) else { return nil }
             _ = try await measureCua {
                 try await CuaDriver.shared.pressKey(
