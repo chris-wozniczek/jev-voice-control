@@ -776,6 +776,37 @@ final class JevStepPlannerTests: XCTestCase {
     }
 
     @MainActor
+    func testStuckRecoveryObservesFullyBeforeWakeOCRAndEscalation() async throws {
+        let fake = FakeJev()
+        let planner = JevStepPlanner(client: fake, canEscalate: true)
+        let context = PlannerContext(
+            goal: "open settings",
+            targetApp: "Safari",
+            snapshot: CuaSnapshot(
+                snapshotId: "ax",
+                treeMarkdown: "",
+                elements: [
+                    CuaElement(token: "button", role: "AXButton", label: "Settings", value: nil),
+                ],
+                image: nil,
+                source: .ax
+            )
+        )
+
+        let fullObserve = try await planner.next(context)
+        XCTAssertEqual(fullObserve.toolCalls.first?.arguments["full"]?.boolValue, true)
+        let wake = try await planner.next(context)
+        XCTAssertEqual(wake.toolCalls.first?.arguments["wake"]?.boolValue, true)
+        let forcedOCR = try await planner.next(context)
+        XCTAssertEqual(forcedOCR.toolCalls.first?.arguments["force_ocr"]?.boolValue, true)
+        let escalated = try await planner.next(context)
+        guard case .toDeepSeek = escalated.escalation else {
+            XCTFail("Expected escalation after full observe, wake, and forced OCR")
+            return
+        }
+    }
+
+    @MainActor
     func testCascadeUsesJevThenDeepSeekAfterEscalation() async throws {
         let jev = StubPlanner(turn: PlannerTurn(
             assistant: DeepSeekMessage(role: "assistant", content: nil, name: nil, toolCallID: nil, toolCalls: nil),
