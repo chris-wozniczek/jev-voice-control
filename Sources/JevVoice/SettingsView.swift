@@ -300,13 +300,25 @@ struct SettingsView: View {
         section("Hearing", systemImage: "waveform.and.mic") {
             VStack(alignment: .leading, spacing: 10) {
                 Picker("Engine", selection: $config.speechEngine) {
-                    Text("Apple Speech").tag(SpeechEngineKind.apple)
+                    Text("Apple (classic)").tag(SpeechEngineKind.apple)
+                    Text("Apple (streaming, macOS 26)")
+                        .tag(SpeechEngineKind.appleStreaming)
+                        .disabled(!SpeechEngineKind.streamingAvailable)
                     Text("Whisper on-device").tag(SpeechEngineKind.whisper)
                 }
                 .onChange(of: config.speechEngine) { _, engine in
                     if engine == .whisper {
                         whisperStore.preload()
+                    } else if engine == .appleStreaming {
+                        if #available(macOS 26, *) {
+                            SpeechAnalyzerEngine.preload()
+                        }
                     }
+                }
+                if !SpeechEngineKind.streamingAvailable {
+                    Text("Apple streaming is unavailable on this macOS")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
                 Picker("Whisper model", selection: $config.whisperModel) {
                     ForEach(WhisperModelStore.models) { model in

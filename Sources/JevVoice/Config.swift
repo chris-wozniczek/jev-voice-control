@@ -2,6 +2,7 @@ import Foundation
 import Combine
 import AVFoundation
 import JevVoiceCore
+import Speech
 
 enum ListeningMode: String, CaseIterable {
     case toggle, hold
@@ -9,6 +10,20 @@ enum ListeningMode: String, CaseIterable {
 
 enum SpeechEngineKind: String, CaseIterable {
     case apple, whisper
+    case appleStreaming
+
+    static func defaultKind(streamingAvailable: Bool) -> SpeechEngineKind {
+        streamingAvailable ? .appleStreaming : .apple
+    }
+
+    static var streamingAvailable: Bool {
+#if swift(>=6.2)
+        if #available(macOS 26, *) {
+            return SpeechTranscriber.isAvailable
+        }
+#endif
+        return false
+    }
 }
 
 enum DeepSeekThinking: String, CaseIterable {
@@ -193,9 +208,16 @@ final class Config: ObservableObject {
         let timeout = defaults.object(forKey: "silenceTimeout") as? Double
             ?? HearingSettings.defaultSilenceTimeout
         self.silenceTimeout = HearingSettings.constrainedSilenceTimeout(timeout)
-        self.speechEngine = SpeechEngineKind(
-            rawValue: defaults.string(forKey: "speechEngine") ?? ""
-        ) ?? .apple
+        if let storedSpeechEngine = defaults.string(forKey: "speechEngine"),
+           let speechEngine = SpeechEngineKind(rawValue: storedSpeechEngine) {
+            self.speechEngine = speechEngine
+        } else {
+            if SpeechEngineKind.streamingAvailable {
+                self.speechEngine = .defaultKind(streamingAvailable: true)
+            } else {
+                self.speechEngine = .defaultKind(streamingAvailable: false)
+            }
+        }
         self.speechLanguage = defaults.string(forKey: "speechLanguage")
         self.customVocabulary = defaults.stringArray(forKey: "customVocabulary")
             ?? ["x.com", "Grok", "Devin", "cmux", "ChatGPT", "Claude", "Gemini", "GitHub"]
