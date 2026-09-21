@@ -148,7 +148,10 @@ final class Config: ObservableObject {
     }
 
     @Published var listeningMode: ListeningMode {
-        didSet { UserDefaults.standard.set(listeningMode.rawValue, forKey: "listeningMode") }
+        didSet {
+            UserDefaults.standard.set(listeningMode.rawValue, forKey: "listeningMode")
+            UserDefaults.standard.set(true, forKey: "listeningModeUserSet")
+        }
     }
 
     @Published var silenceTimeout: Double {
@@ -232,9 +235,10 @@ final class Config: ObservableObject {
         ) ?? .off
         self.fallbackMaxSteps = defaults.object(forKey: "fallbackMaxSteps") as? Int ?? 6
         self.fallbackMaxSeconds = defaults.object(forKey: "fallbackMaxSeconds") as? Double ?? 30
-        self.listeningMode = ListeningMode(
-            rawValue: defaults.string(forKey: "listeningMode") ?? ""
-        ) ?? .toggle
+        let listeningModeWasSet = defaults.object(forKey: "listeningModeUserSet") as? Bool ?? false
+        self.listeningMode = listeningModeWasSet
+            ? (ListeningMode(rawValue: defaults.string(forKey: "listeningMode") ?? "") ?? .hold)
+            : .hold
         let timeout = defaults.object(forKey: "silenceTimeout") as? Double
             ?? HearingSettings.defaultSilenceTimeout
         self.silenceTimeout = HearingSettings.constrainedSilenceTimeout(timeout)

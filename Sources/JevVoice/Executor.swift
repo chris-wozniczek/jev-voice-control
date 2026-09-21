@@ -18,6 +18,7 @@ enum ExecutorError: Error, LocalizedError {
 
 enum Executor {
     static let noFocusedFieldMessage = "Nothing to type into — click where the text should go first"
+    static let textDidNotAppearPrefix = "Couldn't type into"
 
     @MainActor
     static func execute(
@@ -273,6 +274,7 @@ enum Executor {
            TextEntry.focusedTextInput(pid: pid) == nil {
             return noFocusedFieldMessage
         }
+        let beforeSnapshot = AXTreeReader.snapshot(pid: Int(pid), windowFrame: nil)?.snapshot
         let pasteboard = NSPasteboard.general
         let saved: [NSPasteboardItem] = (pasteboard.pasteboardItems ?? []).map { item in
             let copy = NSPasteboardItem()
@@ -310,6 +312,14 @@ enum Executor {
         case .missing:
             Log.agent.info("type readback=miss")
         }
+        if snapshotDiffConfirmsTyping(
+            before: beforeSnapshot,
+            pid: Int(pid),
+            text: text
+        ) {
+            Log.agent.info("type readback=diff")
+            return "Typed \"\(text)\""
+        }
         _ = try? await CuaDriver.shared.type(pid: Int(pid), text: text)
         try? await Task.sleep(for: .milliseconds(150))
         switch TextEntry.readBack(pid: pid, text: text) {
@@ -319,8 +329,36 @@ enum Executor {
             Log.agent.info("type readback=unobservable (unverified)")
             return "Typed \"\(text)\""
         case .missing:
+            if snapshotDiffConfirmsTyping(
+                before: beforeSnapshot,
+                pid: Int(pid),
+                text: text
+            ) {
+                Log.agent.info("type readback=diff")
+                return "Typed \"\(text)\""
+            }
             let name = application.localizedName ?? frontmostApp ?? "the app"
             return "Couldn't type into \(name) — the text didn't appear"
+        }
+    }
+
+    private static func snapshotDiffConfirmsTyping(
+        before: CuaSnapshot?,
+        pid: Int,
+        text: String
+    ) -> Bool {
+        guard let before,
+              let after = AXTreeReader.snapshot(pid: pid, windowFrame: nil)?.snapshot else {
+            return false
+        }
+        if before.elements.count != after.elements.count {
+            return true
+        }
+        let prefix = String(text.prefix(12)).lowercased()
+        guard !prefix.isEmpty else { return false }
+        return after.elements.contains {
+            $0.value?.lowercased().contains(prefix) == true
+                || $0.label.lowercased().contains(prefix)
         }
     }
 

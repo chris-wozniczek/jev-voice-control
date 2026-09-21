@@ -6,7 +6,7 @@ public enum ClauseSplitter {
         "google", "set", "turn", "mute", "unmute", "lock", "sleep", "take",
         "switch", "show", "hide", "play", "pause", "next", "previous",
         "minimize", "minimise", "shrink", "focus", "activate", "bring", "run",
-        "start", "exit", "kill", "terminate", "shut",
+        "start", "create", "exit", "kill", "terminate", "shut",
     ]
 
     public struct Boundary: Equatable {
@@ -37,6 +37,28 @@ public enum ClauseSplitter {
 
     private static let conjunctionPattern = #"\b(and then|and also|then|and)\b"#
     private static let dictationVerbs: Set<String> = ["type", "write", "dictate", "say", "enter"]
+    private static let payloadOpenerPatterns = [
+        #"\btitle(?:\s+(?:it|the note))?\s+to\b"#,
+        #"\brename(?:\s+\w+){0,4}\s+to\b"#,
+        #"\bname it\b"#,
+        #"\bcall it\b"#,
+        #"\bsearch for\b"#,
+        #"\blook up\b"#,
+        #"\breply with\b"#,
+        #"\banswer with\b"#,
+        #"\brespond with\b"#,
+    ]
+
+    private static func payloadStart(in transcript: String) -> Int? {
+        let ns = transcript as NSString
+        let fullRange = NSRange(location: 0, length: ns.length)
+        return payloadOpenerPatterns.compactMap { pattern in
+            try? NSRegularExpression(pattern: pattern, options: .caseInsensitive)
+        }
+        .compactMap { $0.firstMatch(in: transcript, range: fullRange) }
+        .map { $0.range.location + $0.range.length }
+        .min()
+    }
 
     public static func candidateBoundaries(_ transcript: String) -> [Boundary] {
         let ns = transcript as NSString
@@ -93,10 +115,12 @@ public enum ClauseSplitter {
         var result: [Boundary] = []
         var seenLocations = Set<Int>()
         var dictationActive = words.first.map { dictationVerbs.contains($0.value) } ?? false
+        let payloadBoundary = payloadStart(in: transcript)
 
         for candidate in sorted {
             let location = candidate.boundary.location
             if seenLocations.contains(location) { continue }
+            if let payloadBoundary, location >= payloadBoundary { continue }
             switch candidate.kind {
             case .punctuation:
                 guard !dictationActive else { continue }
@@ -255,9 +279,58 @@ public enum ClauseSplitter {
         let ns = transcript as NSString
         let fullRange = NSRange(location: 0, length: ns.length)
         let matches = regex.matches(in: transcript, range: fullRange)
+        let payloadBoundary = payloadStart(in: transcript)
 
         var splitLocations: [(start: Int, resume: Int)] = []
+        for index in 0..<ns.length {
+            let character = ns.substring(with: NSRange(location: index, length: 1)).first!
+            guard ",;.".contains(character),
+                  payloadBoundary.map({ index < $0 }) ?? true else { continue }
+            var resume = index + 1
+            while resume < ns.length,
+                  ns.substring(with: NSRange(location: resume, length: 1))
+                    .first?.isWhitespace == true {
+                resume += 1
+            }
+            guard resume < ns.length else { continue }
+            var wordEnd = resume
+            while wordEnd < ns.length,
+                  ns.substring(with: NSRange(location: wordEnd, length: 1))
+                    .first?.isLetter == true {
+                wordEnd += 1
+            }
+            let nextWord = ns.substring(with: NSRange(
+                location: resume,
+                length: wordEnd - resume
+            )).lowercased()
+            if commandVerbs.contains(nextWord) {
+                splitLocations.append((start: index, resume: resume))
+            } else if ["and", "then"].contains(nextWord) {
+                var commandStart = wordEnd
+                while commandStart < ns.length,
+                      ns.substring(with: NSRange(location: commandStart, length: 1))
+                        .first?.isWhitespace == true {
+                    commandStart += 1
+                }
+                var commandEnd = commandStart
+                while commandEnd < ns.length,
+                      ns.substring(with: NSRange(location: commandEnd, length: 1))
+                        .first?.isLetter == true {
+                    commandEnd += 1
+                }
+                let command = ns.substring(with: NSRange(
+                    location: commandStart,
+                    length: commandEnd - commandStart
+                )).lowercased()
+                if commandVerbs.contains(command) {
+                    splitLocations.append((start: index, resume: commandStart))
+                }
+            }
+        }
         for match in matches {
+            if let payloadBoundary, match.range.location >= payloadBoundary {
+                continue
+            }
             let after = match.range.location + match.range.length
             guard after < ns.length else { continue }
             var i = after
@@ -279,7 +352,8 @@ public enum ClauseSplitter {
 
         var parts: [String] = []
         var last = 0
-        for loc in splitLocations {
+        for loc in splitLocations.sorted(by: { $0.start < $1.start }) {
+            guard loc.start >= last else { continue }
             let piece = ns.substring(with: NSRange(location: last, length: loc.start - last))
             let trimmed = piece.trimmingCharacters(in: .whitespacesAndNewlines)
             if !trimmed.isEmpty { parts.append(trimmed) }

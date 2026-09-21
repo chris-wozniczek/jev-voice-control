@@ -79,6 +79,19 @@ final class LocalCommandParserTests: XCTestCase {
         XCTAssertEqual(decision?.query, "a note apologising for the delay")
     }
 
+    func testTitlePayloadRemainsOneUITaskGoal() {
+        let clause = "Change the title to hi, hello"
+        let decision = LocalCommandParser.parse(
+            clause: clause,
+            installedApps: apps,
+            aliases: AppMatcher.builtInAliases,
+            frontmostApp: "Safari"
+        )
+        XCTAssertEqual(decision?.action, .uiTask)
+        XCTAssertEqual(decision?.clause, clause)
+        XCTAssertEqual(decision?.text, clause)
+    }
+
     func testDictationPrefixesAndFillers() {
         let cases: [(String, String?)] = [
             ("type hello", "hello"),

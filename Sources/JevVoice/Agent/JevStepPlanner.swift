@@ -77,6 +77,7 @@ final class JevStepPlanner: ActionPlanner {
     private var previousElementCount: Int?
     private var previousSnapshot: CuaSnapshot?
     private var forcedOCRRequested = false
+    private var wakeRequested = false
     private var creationFired: (label: String, fingerprintBefore: String)?
 
     private let interactiveRoles: Set<String> = [
@@ -563,6 +564,19 @@ final class JevStepPlanner: ActionPlanner {
         }
         if selectedChoice == "stuck" {
             let hasOCR = snapshot.elements.contains { $0.token.hasPrefix("ocr:") }
+            if snapshot.source == .ax, !wakeRequested {
+                wakeRequested = true
+                let observeCall = DeepSeekToolCall(
+                    id: "jev-\(ctx.stepIndex + 1)",
+                    name: "observe",
+                    arguments: [
+                        "app": ctx.targetApp.map(JSONValue.string) ?? .null,
+                        "screenshot": .bool(false),
+                        "wake": .bool(true),
+                    ]
+                )
+                return makeTurn(call: observeCall)
+            }
             if canEscalate, !hasOCR, !forcedOCRRequested {
                 forcedOCRRequested = true
                 let observeCall = DeepSeekToolCall(
@@ -650,15 +664,35 @@ final class JevStepPlanner: ActionPlanner {
         }.count
         let includeExtras = interactiveCount < 8
         var seen = Set<String>()
-        let selected = elements.filter { element in
-            guard !excludedLabels.contains(element.label) else { return false }
+        let axInteractiveLabels = Set(elements.compactMap { element -> String? in
+            guard !element.token.hasPrefix("ocr:"),
+                  interactiveRoles.contains(element.role) else { return nil }
+            let label = element.label.trimmingCharacters(in: .whitespacesAndNewlines)
+            return label.isEmpty ? nil : label.lowercased()
+        })
+        var axElements: [CuaElement] = []
+        var ocrElements: [CuaElement] = []
+        for element in elements {
+            guard !excludedLabels.contains(element.label) else { continue }
             let hasLabel = !element.label.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             let isInteractive = interactiveRoles.contains(element.role)
                 && (hasLabel || textRoles.contains(element.role))
-            guard isInteractive || (includeExtras && hasLabel) else { return false }
+            if element.token.hasPrefix("ocr:") {
+                let normalized = element.label.trimmingCharacters(in: .whitespacesAndNewlines)
+                    .lowercased()
+                guard hasLabel, !axInteractiveLabels.contains(normalized) else { continue }
+            } else {
+                guard isInteractive || (includeExtras && hasLabel) else { continue }
+            }
             let key = "\(element.role)|\(element.label)|\(element.value ?? "")"
-            return seen.insert(key).inserted
-        }.prefix(200)
+            guard seen.insert(key).inserted else { continue }
+            if element.token.hasPrefix("ocr:") {
+                ocrElements.append(element)
+            } else {
+                axElements.append(element)
+            }
+        }
+        let selected = Array(axElements.prefix(200)) + Array(ocrElements.prefix(60))
         let goalWords = GoalWords.words(goal)
         var ranked: [RankedCandidate] = []
         for (index, element) in selected.enumerated() {

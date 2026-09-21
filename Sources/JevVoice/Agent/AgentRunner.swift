@@ -627,7 +627,7 @@ final class AgentRunner: ObservableObject {
                 return try await afterMutation(result.text ?? "Clicked")
             }
         case "click_at":
-            guard let pid = lastPID, let window = lastWindowID,
+            guard let pid = lastPID, lastWindowID != nil,
                   let x = number(call.arguments["x"]),
                   let y = number(call.arguments["y"]) else {
                 throw AgentError.api("Observe a window before clicking coordinates")
@@ -643,15 +643,13 @@ final class AgentRunner: ObservableObject {
                 y: y,
                 scale: lastScreenshotScale
             )
-            let result = try await measureCua {
-                try await CuaDriver.shared.click(
-                    pid: pid,
-                    windowId: window,
-                    x: point.x,
-                    y: point.y
-                )
-            }
-            return try await afterMutation(result.text ?? "Clicked")
+            NSRunningApplication(processIdentifier: pid_t(pid))?.activate()
+            try await Task.sleep(for: .milliseconds(100))
+            Log.agent.info(
+                "stage=click kind=coordinate x=\(point.x, privacy: .public) y=\(point.y, privacy: .public)"
+            )
+            CGEventClicker.click(at: point)
+            return try await afterMutation("Clicked")
         case "type_text":
             guard let text = call.arguments["text"]?.stringValue else {
                 throw AgentError.api("type_text requires text")
@@ -785,6 +783,7 @@ final class AgentRunner: ObservableObject {
         if arguments["force_ocr"]?.boolValue == true {
             forceOCRRequested = true
         }
+        let wakeRequested = arguments["wake"]?.boolValue == true
         var runningApps = try await apps()
         let explicit = arguments["app"]?.stringValue
         if let explicit, !explicit.isEmpty {
@@ -873,7 +872,13 @@ final class AgentRunner: ObservableObject {
                     Log.agent.info(
                         "stage=axtree elements=\(ax.snapshot.elements.count) interactive=\(ax.snapshot.elements.filter { AXTreeReader.interactiveRoles.contains($0.role) }.count) elapsed=\(axElapsed)"
                     )
-                    candidateSnapshot = ax.snapshot
+                    candidateSnapshot = CuaSnapshot(
+                        snapshotId: ax.snapshot.snapshotId,
+                        treeMarkdown: ax.snapshot.treeMarkdown,
+                        elements: ax.snapshot.elements,
+                        image: ax.snapshot.image,
+                        source: .ax
+                    )
                     candidateEntries = ax.entries
                     if wantsImage && Permission.screenRecording.isGranted {
                         let imageStarted = Date()
@@ -936,7 +941,8 @@ final class AgentRunner: ObservableObject {
             includeImage: wantsImage,
             reportedApps: reportedApps,
             snapshot: selectedSnapshot,
-            axEntries: chosenWindow == nil ? firstEntries : chosenEntries
+            axEntries: chosenWindow == nil ? firstEntries : chosenEntries,
+            wake: wakeRequested
         )
     }
 
@@ -946,7 +952,8 @@ final class AgentRunner: ObservableObject {
         includeImage: Bool,
         reportedApps: [CuaApp],
         snapshot: CuaSnapshot?,
-        axEntries: [String: AXEntry]
+        axEntries: [String: AXEntry],
+        wake: Bool = false
     ) async throws -> ToolOutput {
         Log.cua.info(
             "chosen window title=\(window.title, privacy: .public) app=\(app.name, privacy: .public)"
@@ -971,7 +978,13 @@ final class AgentRunner: ObservableObject {
                 Log.agent.info(
                     "stage=axtree elements=\(ax.snapshot.elements.count) interactive=\(ax.snapshot.elements.filter { AXTreeReader.interactiveRoles.contains($0.role) }.count) elapsed=\(axElapsed)"
                 )
-                resolvedSnapshot = ax.snapshot
+                resolvedSnapshot = CuaSnapshot(
+                    snapshotId: ax.snapshot.snapshotId,
+                    treeMarkdown: ax.snapshot.treeMarkdown,
+                    elements: ax.snapshot.elements,
+                    image: ax.snapshot.image,
+                    source: .ax
+                )
                 resolvedAXEntries = ax.entries
                 if includeImage && Permission.screenRecording.isGranted {
                     let imageStarted = Date()
@@ -986,7 +999,8 @@ final class AgentRunner: ObservableObject {
                         snapshotId: resolvedSnapshot.snapshotId,
                         treeMarkdown: resolvedSnapshot.treeMarkdown,
                         elements: resolvedSnapshot.elements,
-                        image: imageSnapshot.image
+                        image: imageSnapshot.image,
+                        source: .ax
                     )
                 }
             } else {
@@ -999,6 +1013,25 @@ final class AgentRunner: ObservableObject {
                 let treeElapsed = Date().timeIntervalSince(treeStarted)
                 cuaSeconds += treeElapsed
                 Log.agent.info("stage=tree elapsed=\(treeElapsed)")
+            }
+        }
+        if wake, resolvedSnapshot.source == .ax,
+           let frame = lastWindowFrame ?? Self.cgRect(window.frame) {
+            _ = await Task.detached(priority: .userInitiated) {
+                AXTreeReader.wake(pid: app.pid, windowFrame: frame)
+            }.value
+            let refreshed = await Task.detached(priority: .userInitiated) {
+                AXTreeReader.snapshot(pid: app.pid, windowFrame: frame)
+            }.value
+            if let refreshed {
+                resolvedSnapshot = CuaSnapshot(
+                    snapshotId: refreshed.snapshot.snapshotId,
+                    treeMarkdown: refreshed.snapshot.treeMarkdown,
+                    elements: refreshed.snapshot.elements,
+                    image: refreshed.snapshot.image,
+                    source: .ax
+                )
+                resolvedAXEntries = refreshed.entries
             }
         }
         lastCDPTitle = nil
@@ -1036,7 +1069,8 @@ final class AgentRunner: ObservableObject {
                     snapshotId: resolvedSnapshot.snapshotId,
                     treeMarkdown: resolvedSnapshot.treeMarkdown,
                     elements: resolvedSnapshot.elements + cdpElements,
-                    image: resolvedSnapshot.image
+                    image: resolvedSnapshot.image,
+                    source: .cdp
                 )
                 lastCDPTitle = window.title
                 lastCDPPort = Config.shared.cdpPort
@@ -1072,7 +1106,8 @@ final class AgentRunner: ObservableObject {
                     snapshotId: mergedSnapshot.snapshotId,
                     treeMarkdown: mergedSnapshot.treeMarkdown + "\n" + lines,
                     elements: mergedSnapshot.elements + hits.map(\.element),
-                    image: mergedSnapshot.image
+                    image: mergedSnapshot.image,
+                    source: mergedSnapshot.source
                 )
                 ocrPoints = Dictionary(uniqueKeysWithValues: hits.map {
                     ($0.element.token, $0.point)

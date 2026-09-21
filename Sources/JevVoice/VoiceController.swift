@@ -647,7 +647,10 @@ final class VoiceController: ObservableObject {
                         : decision.targetApp
                 )
                 if decision.action == .dictate,
-                   result == Executor.noFocusedFieldMessage,
+                   (
+                       result == Executor.noFocusedFieldMessage
+                           || result.hasPrefix(Executor.textDidNotAppearPrefix)
+                   ),
                    config.computerUseEnabled,
                    agentAvailable {
                     let outcome = await AgentRunner.shared.run(

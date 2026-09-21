@@ -12,6 +12,19 @@ public enum LocalCommandParser {
         let trimmed = clause.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
 
+        if trimmed.range(
+            of: #"^(?:change\s+(?:the\s+)?)?title(?:\s+(?:it|the note))?\s+to\b"#,
+            options: [.regularExpression, .caseInsensitive]
+        ) != nil {
+            return Decision(
+                clause: trimmed,
+                action: .uiTask,
+                text: trimmed,
+                confidence: 0.9,
+                model: "local"
+            )
+        }
+
         if let deferred = SlotExtractor.deferredDictation(
             from: trimmed,
             installedApps: installedApps,
