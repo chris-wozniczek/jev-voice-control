@@ -327,6 +327,7 @@ final class WhisperSpeechEngine: SpeechEngine {
     private var partialTask: Task<Void, Never>?
     private var loadTask: Task<Void, Never>?
     private var transcriptionInFlight = false
+    private var transcriptionInFlightIsFinal = false
     private var transcriptionDirty = false
     private var finishing = false
     private var generation = 0
@@ -387,14 +388,17 @@ final class WhisperSpeechEngine: SpeechEngine {
                 if self.finishing {
                     self.finishTask?.cancel()
                     self.finishTask = nil
-                    await self.transcribeLatest(isFinal: true)
+                    await self.transcribeLatest(
+                        isFinal: true,
+                        trigger: self.didSignalSilence ? "silence" : "finish"
+                    )
                 } else {
                     self.onListening?()
                     self.partialTask = Task { [weak self] in
                         while !Task.isCancelled {
                             try? await Task.sleep(nanoseconds: 800_000_000)
                             guard !Task.isCancelled else { return }
-                            await self?.transcribeLatest(isFinal: false)
+                            await self?.transcribeLatest(isFinal: false, trigger: "partial")
                         }
                     }
                     self.silenceTask = Task { [weak self] in
@@ -424,8 +428,10 @@ final class WhisperSpeechEngine: SpeechEngine {
 
     func finish() {
         finishing = true
-        partialTask?.cancel()
-        partialTask = nil
+        if !transcriptionInFlight {
+            partialTask?.cancel()
+            partialTask = nil
+        }
         silenceTask?.cancel()
         silenceTask = nil
         audioEngine.stop()
@@ -449,8 +455,17 @@ final class WhisperSpeechEngine: SpeechEngine {
             }
             return
         }
-        Task { [weak self] in
-            await self?.transcribeLatest(isFinal: true)
+        if transcriptionInFlight {
+            if !transcriptionInFlightIsFinal {
+                transcriptionDirty = true
+            }
+        } else {
+            Task { [weak self] in
+                await self?.transcribeLatest(
+                    isFinal: true,
+                    trigger: self?.didSignalSilence == true ? "silence" : "finish"
+                )
+            }
         }
     }
 
@@ -570,21 +585,33 @@ final class WhisperSpeechEngine: SpeechEngine {
         }
     }
 
-    private func transcribeLatest(isFinal: Bool) async {
+    nonisolated static func finalText(
+        passText: String?,
+        failure: Error?,
+        lastPartial: String
+    ) -> String? {
+        if let passText, !passText.isEmpty {
+            return passText
+        }
+        if failure is CancellationError || !lastPartial.isEmpty {
+            return lastPartial
+        }
+        return ""
+    }
+
+    private func transcribeLatest(isFinal: Bool, trigger: String) async {
         guard let whisperKit, !samples.isEmpty else {
             if isFinal { onFinal?("") }
             return
         }
+        guard isFinal || (!finishing && !didSignalSilence) else { return }
         if transcriptionInFlight {
             transcriptionDirty = true
             return
         }
-        if isFinal, samplesAtLastVoice <= samplesAtLastPass, !lastPassText.isEmpty {
-            onFinal?(lastPassText)
-            return
-        }
         guard isFinal || samples.count - samplesAtLastPass >= 8_000 else { return }
         transcriptionInFlight = true
+        transcriptionInFlightIsFinal = isFinal
         transcriptionDirty = false
         let audio = samples
         if !isFinal {
@@ -603,9 +630,12 @@ final class WhisperSpeechEngine: SpeechEngine {
         }
         let options = DecodingOptions(
             language: language,
+            temperatureFallbackCount: 0,
             skipSpecialTokens: true,
             withoutTimestamps: true,
-            promptTokens: tokens
+            promptTokens: tokens,
+            logProbThreshold: nil,
+            firstTokenLogProbThreshold: nil
         )
         let results = await whisperKit.transcribeWithResults(
             audioArrays: [audio],
@@ -631,13 +661,22 @@ final class WhisperSpeechEngine: SpeechEngine {
             )
         }
         Log.speech.info(
-            "whisper pass final=\(isFinal) samples=\(audio.count) text=\(text, privacy: .public) elapsed=\(Date().timeIntervalSince(started), privacy: .public)"
+            "whisper pass final=\(isFinal) trigger=\(trigger, privacy: .public) samples=\(audio.count) text=\(text, privacy: .public) elapsed=\(Date().timeIntervalSince(started), privacy: .public)"
         )
         if failure == nil, text.isEmpty {
             Log.speech.info("whisper transcribe empty samples=\(audio.count)")
         }
         if let failure, isFinal {
-            onError?(failure)
+            if failure is CancellationError || !lastPassText.isEmpty {
+                Log.speech.info("whisper final fallback=lastPartial")
+                onFinal?(Self.finalText(
+                    passText: nil,
+                    failure: failure,
+                    lastPartial: lastPassText
+                ) ?? "")
+            } else {
+                onError?(failure)
+            }
         } else if isFinal {
             onFinal?(text)
         } else if !text.isEmpty {
@@ -645,8 +684,14 @@ final class WhisperSpeechEngine: SpeechEngine {
             onPartial?(text)
         }
         transcriptionInFlight = false
+        transcriptionInFlightIsFinal = false
         if transcriptionDirty {
-            await transcribeLatest(isFinal: finishing)
+            await transcribeLatest(
+                isFinal: finishing,
+                trigger: finishing
+                    ? (didSignalSilence ? "silence" : "finish")
+                    : "partial"
+            )
         }
     }
 }

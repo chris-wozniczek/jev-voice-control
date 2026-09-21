@@ -249,18 +249,26 @@ enum Executor {
 
     private static func dictate(_ text: String, frontmostApp: String?) async -> String {
         let ownBundleID = Bundle.main.bundleIdentifier
-        let application = frontmostApp.flatMap { name in
-            NSWorkspace.shared.runningApplications.first {
-                $0.localizedName?.caseInsensitiveCompare(name) == .orderedSame
+        let application: NSRunningApplication?
+        if let frontmostApp {
+            application = NSWorkspace.shared.runningApplications.first {
+                $0.localizedName?.caseInsensitiveCompare(frontmostApp) == .orderedSame
             }
+        } else {
+            application = NSWorkspace.shared.frontmostApplication
         }
         if frontmostApp != nil, application == nil {
             return "Nothing to type into — click where the text should go first"
-        } else if let application {
-            guard await KeyboardFocus.bringToFront(pid: application.processIdentifier) else {
-                return "Nothing to type into — click where the text should go first"
-            }
-        } else if NSWorkspace.shared.frontmostApplication?.bundleIdentifier == ownBundleID {
+        }
+        guard let application,
+              application.bundleIdentifier != ownBundleID,
+              await KeyboardFocus.bringToFront(pid: application.processIdentifier) else {
+            return "Nothing to type into — click where the text should go first"
+        }
+        let pid = application.processIdentifier
+        if TextEntry.focusedTextInput(pid: pid) == nil,
+           !TextEntry.focusTextElementIfNeeded(pid: pid),
+           TextEntry.focusedTextInput(pid: pid) == nil {
             return "Nothing to type into — click where the text should go first"
         }
         let pasteboard = NSPasteboard.general
@@ -289,6 +297,16 @@ enum Executor {
                 pasteboard.clearContents()
                 if !saved.isEmpty { pasteboard.writeObjects(saved) }
             }
+        }
+        try? await Task.sleep(for: .milliseconds(150))
+        if TextEntry.verifyTyped(pid: pid, text: text) {
+            return "Typed \"\(text)\""
+        }
+        _ = try? await CuaDriver.shared.type(pid: Int(pid), text: text)
+        try? await Task.sleep(for: .milliseconds(150))
+        guard TextEntry.verifyTyped(pid: pid, text: text) else {
+            let name = application.localizedName ?? frontmostApp ?? "the app"
+            return "Couldn't type into \(name) — the text didn't appear"
         }
         return "Typed \"\(text)\""
     }

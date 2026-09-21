@@ -11,6 +11,7 @@ final class FastPathPlanner: ActionPlanner {
     private let inner: ActionPlanner
     private var initialFingerprint: Fingerprint?
     private var unchangedPolls = 0
+    private var menuRetryIssued = false
 
     init(action: AppAction, inner: ActionPlanner) {
         self.action = action
@@ -65,6 +66,24 @@ final class FastPathPlanner: ActionPlanner {
                         "fastpath poll n=\(self.unchangedPolls, privacy: .public)"
                     )
                     return observeTurn(ctx)
+                }
+                if !menuRetryIssued,
+                   let lastStep = action.steps.last,
+                   case .key(let key, let modifiers) = lastStep,
+                   modifiers.contains(where: { $0.caseInsensitiveCompare("command") == .orderedSame }) {
+                    menuRetryIssued = true
+                    Log.agent.info(
+                        "fastpath retry menu action=\(self.action.name, privacy: .public)"
+                    )
+                    return makeTurn(DeepSeekToolCall(
+                        id: "fastpath-\(ctx.stepIndex + 1)",
+                        name: "press_key",
+                        arguments: [
+                            "key": .string(key),
+                            "modifiers": .array(modifiers.map(JSONValue.string)),
+                            "via_menu": .bool(true),
+                        ]
+                    ))
                 }
             }
             return try await inner.next(ctx)

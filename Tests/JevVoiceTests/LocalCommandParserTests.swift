@@ -76,4 +76,27 @@ final class LocalCommandParserTests: XCTestCase {
         XCTAssertNil(decision?.text)
         XCTAssertEqual(decision?.query, "a note apologising for the delay")
     }
+
+    func testDictationPrefixesAndFillers() {
+        let cases: [(String, String?)] = [
+            ("type hello", "hello"),
+            ("type prompt, check RAM usage", "check RAM usage"),
+            ("type: hello there", "hello there"),
+            ("type the message hi", "hi"),
+            ("type in hello", "hello"),
+            ("type out hello", "hello"),
+            ("enter hello", "hello"),
+            ("type prompt", nil),
+        ]
+        for (clause, expected) in cases {
+            let decision = LocalCommandParser.parse(
+                clause: clause,
+                installedApps: apps,
+                aliases: AppMatcher.builtInAliases,
+                frontmostApp: "Safari"
+            )
+            XCTAssertEqual(decision?.action, expected == nil ? nil : .dictate, clause)
+            XCTAssertEqual(decision?.text, expected, clause)
+        }
+    }
 }
