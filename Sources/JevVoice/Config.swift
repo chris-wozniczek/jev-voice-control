@@ -16,8 +16,16 @@ enum SpeechEngineKind: String, CaseIterable {
         streamingAvailable ? .appleStreaming : .apple
     }
 
+    static let streamingCompiledIn: Bool = {
+#if compiler(>=6.2)
+        true
+#else
+        false
+#endif
+    }()
+
     static var streamingAvailable: Bool {
-#if swift(>=6.2)
+#if compiler(>=6.2)
         if #available(macOS 26, *) {
             return SpeechTranscriber.isAvailable
         }

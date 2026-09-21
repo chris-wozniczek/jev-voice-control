@@ -13,6 +13,12 @@ final class SpeechAnalyzerEngineTests: XCTestCase {
         )
     }
 
+#if compiler(>=6.2)
+    func testStreamingEngineIsCompiledIntoCurrentToolchain() {
+        XCTAssertTrue(SpeechEngineKind.streamingCompiledIn)
+    }
+#endif
+
     func testAssembleFinalIncludesLastVolatileText() throws {
         guard #available(macOS 26, *) else {
             throw XCTSkip("SpeechAnalyzer requires macOS 26")

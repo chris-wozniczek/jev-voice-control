@@ -93,7 +93,7 @@ final class SpeechRecognizer: ObservableObject {
             self?.statusMessage = message
         }
         Log.speech.info(
-            "engine start name=\(String(describing: type(of: engine)), privacy: .public) mode=\(Config.shared.listeningMode.rawValue, privacy: .public)"
+            "engine start name=\(String(describing: type(of: engine)), privacy: .public) mode=\(Config.shared.listeningMode.rawValue, privacy: .public) streamingCompiledIn=\(SpeechEngineKind.streamingCompiledIn, privacy: .public)"
         )
         self.engine = engine
         isRunning = true

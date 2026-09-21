@@ -1,6 +1,12 @@
 import AppKit
 import Carbon
 import SwiftUI
+import Darwin
+
+if CommandLine.arguments.contains("--engine-info") {
+    print("streamingCompiledIn=\(SpeechEngineKind.streamingCompiledIn) streamingAvailable=\(SpeechEngineKind.streamingAvailable)")
+    exit(0)
+}
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
