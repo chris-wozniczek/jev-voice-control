@@ -1,0 +1,75 @@
+[
+  {
+    "name": "toggle_dark_mode",
+    "description": "Turn macOS dark mode on or off",
+    "language": "applescript",
+    "arguments": [
+      { "name": "state", "type": "enum", "values": ["on", "off"], "description": "Dark mode state" }
+    ],
+    "script": "tell application \"System Events\" to tell appearance preferences to set dark mode to {{state == on}}",
+    "spokenResult": "Dark mode is now {{state}}.",
+    "mutates": true,
+    "verifyScript": "tell application \"System Events\" to tell appearance preferences to get dark mode",
+    "utteranceExamples": ["turn on dark mode", "switch to light mode"]
+  },
+  {
+    "name": "set_volume",
+    "description": "Set the system volume",
+    "language": "applescript",
+    "arguments": [
+      { "name": "level", "type": "number", "description": "Volume percentage from 0 to 100" }
+    ],
+    "script": "tell application \"System Events\" to set (sound volume of (get volume settings)) to {{level}}",
+    "spokenResult": "System volume is now {{level}} percent.",
+    "mutates": true,
+    "verifyScript": "get output volume of (get volume settings)",
+    "utteranceExamples": ["set volume to 50 percent", "turn volume down to 20"]
+  },
+  {
+    "name": "add_reminder",
+    "description": "Add a reminder",
+    "language": "applescript",
+    "arguments": [
+      { "name": "text", "type": "string", "description": "Reminder text" }
+    ],
+    "script": "tell application \"Reminders\" to tell list \"Reminders\" to make new reminder with properties {name:{{text}}}",
+    "spokenResult": "Added reminder {{text}}.",
+    "mutates": true,
+    "utteranceExamples": ["remind me to buy milk", "add a reminder to call Sam"]
+  },
+  {
+    "name": "create_calendar_event",
+    "description": "Create a calendar event today",
+    "language": "applescript",
+    "arguments": [
+      { "name": "title", "type": "string", "description": "Event title" },
+      { "name": "time", "type": "number", "description": "Start hour today, from 0 to 23" }
+    ],
+    "script": "set eventDate to current date\nset hours of eventDate to {{time}}\nset minutes of eventDate to 0\ntell application \"Calendar\" to tell calendar 1 to make new event with properties {summary:{{title}}, start date:eventDate}",
+    "spokenResult": "Created calendar event {{title}}.",
+    "mutates": true,
+    "utteranceExamples": ["create a calendar event called standup at 10", "add an event for lunch"]
+  },
+  {
+    "name": "start_timer",
+    "description": "Start a timer and notify when it finishes",
+    "language": "applescript",
+    "arguments": [
+      { "name": "minutes", "type": "number", "description": "Timer duration in minutes" }
+    ],
+    "script": "set dueDate to (current date) + ({{minutes}} * minutes)\ntell application \"Reminders\" to tell list \"Reminders\" to make new reminder with properties {name:\"Timer finished\", remind me date:dueDate}",
+    "spokenResult": "Started a {{minutes}} minute timer.",
+    "mutates": true,
+    "utteranceExamples": ["start a timer for 10 minutes", "set a five minute timer"]
+  },
+  {
+    "name": "empty_downloads",
+    "description": "Move the contents of Downloads to the Trash",
+    "language": "applescript",
+    "arguments": [],
+    "script": "tell application \"Finder\" to delete every item of folder \"Downloads\" of home",
+    "spokenResult": "Moved Downloads to the Trash.",
+    "mutates": true,
+    "utteranceExamples": ["empty my downloads folder", "trash everything in downloads"]
+  }
+]

@@ -7,6 +7,7 @@ struct SettingsView: View {
     @ObservedObject private var config = Config.shared
     @ObservedObject private var driver = CuaDriver.shared
     @ObservedObject private var whisperStore = WhisperModelStore.shared
+    @ObservedObject private var learnedToolStore = LearnedToolStore.shared
     @State private var aliasDrafts: [AliasDraft] = []
     @State private var driverTestStatus = ""
     @State private var hintCount = HintStore.shared.count
@@ -247,6 +248,7 @@ struct SettingsView: View {
                         }
                     }
 
+                    learnedToolsSection
                     hearingSection
                     section("Voice", systemImage: "speaker.wave.2") {
                 VStack(alignment: .leading, spacing: 8) {
@@ -433,6 +435,57 @@ struct SettingsView: View {
                 Text("Whisper hears app names like cmux and Devin more reliably; runs fully offline.")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private var learnedToolsSection: some View {
+        section("Learned tools", systemImage: "wand.and.stars") {
+            VStack(alignment: .leading, spacing: 8) {
+                Toggle("Learn scriptable tools", isOn: $config.learnedToolsEnabled)
+                    .toggleStyle(.switch)
+                    .controlSize(.small)
+                Text("Jev can generate safe AppleScript/JXA shortcuts for system tasks. UI work stays with Computer use.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                HStack {
+                    Text("\(learnedToolStore.records().count) tools")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Button("Reveal tools folder") {
+                        learnedToolStore.revealFolder()
+                    }
+                    .controlSize(.small)
+                }
+                ForEach(learnedToolStore.records()) { record in
+                    HStack(alignment: .top, spacing: 8) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(record.tool.description)
+                                .font(.callout)
+                            Text("\(record.source == "seed" ? "Seed" : "Learned") · \(record.useCount) uses")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        Toggle(
+                            "",
+                            isOn: Binding(
+                                get: { record.enabled },
+                                set: { learnedToolStore.setEnabled($0, for: record.id) }
+                            )
+                        )
+                        .labelsHidden()
+                        if record.source == "learned" {
+                            Button {
+                                learnedToolStore.delete(record.id)
+                            } label: {
+                                Image(systemName: "trash")
+                            }
+                            .buttonStyle(.borderless)
+                        }
+                    }
+                }
             }
         }
     }

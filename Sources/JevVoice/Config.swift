@@ -119,6 +119,10 @@ final class Config: ObservableObject {
         didSet { UserDefaults.standard.set(previewGeneratedText, forKey: "previewGeneratedText") }
     }
 
+    @Published var learnedToolsEnabled: Bool {
+        didSet { UserDefaults.standard.set(learnedToolsEnabled, forKey: "learnedToolsEnabled") }
+    }
+
     @Published var plannerMode: PlannerMode {
         didSet { UserDefaults.standard.set(plannerMode.rawValue, forKey: "plannerMode") }
     }
@@ -211,6 +215,7 @@ final class Config: ObservableObject {
         self.omlxBaseURL = defaults.string(forKey: "omlxBaseURL") ?? "http://127.0.0.1:8000"
         self.omlxTextModel = defaults.string(forKey: "omlxTextModel") ?? ""
         self.previewGeneratedText = defaults.object(forKey: "previewGeneratedText") as? Bool ?? true
+        self.learnedToolsEnabled = defaults.object(forKey: "learnedToolsEnabled") as? Bool ?? true
         self.plannerMode = PlannerMode(
             rawValue: defaults.string(forKey: "plannerMode") ?? ""
         ) ?? .jev
