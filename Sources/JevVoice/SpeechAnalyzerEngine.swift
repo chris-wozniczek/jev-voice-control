@@ -190,14 +190,13 @@ final class SpeechAnalyzerEngine: SpeechEngine {
         let context = AnalysisContext()
         context.contextualStrings[.general] = Array(vocabulary.prefix(200))
         let analyzer = SpeechAnalyzer(
-            inputSequence: stream,
             modules: modules,
             options: SpeechAnalyzer.Options(
                 priority: .userInitiated,
                 modelRetention: .processLifetime
-            ),
-            analysisContext: context
+            )
         )
+        try await analyzer.setContext(context)
         let transcriber = modules.compactMap { $0 as? SpeechTranscriber }.first!
         let detector = modules.compactMap { $0 as? SpeechDetector }.first!
         let inputFormat = audioEngine.inputNode.inputFormat(forBus: 0)
