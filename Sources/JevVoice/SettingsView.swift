@@ -78,6 +78,20 @@ struct SettingsView: View {
                                 Text("Low").tag(DeepSeekThinking.low)
                                 Text("High").tag(DeepSeekThinking.high)
                             }
+                            Stepper(
+                                "Fallback max steps: \(config.fallbackMaxSteps)",
+                                value: $config.fallbackMaxSteps,
+                                in: 1...25
+                            )
+                            Stepper(
+                                "Fallback max seconds: \(Int(config.fallbackMaxSeconds))",
+                                value: $config.fallbackMaxSeconds,
+                                in: 5...90,
+                                step: 1
+                            )
+                            Text("DeepSeek fallback stops after either limit.")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
                             Text("Written replies")
                                 .font(.callout.weight(.semibold))
                                 .padding(.top, 4)

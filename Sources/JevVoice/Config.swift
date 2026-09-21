@@ -127,6 +127,14 @@ final class Config: ObservableObject {
         didSet { UserDefaults.standard.set(deepSeekThinking.rawValue, forKey: "deepSeekThinking") }
     }
 
+    @Published var fallbackMaxSteps: Int {
+        didSet { UserDefaults.standard.set(fallbackMaxSteps, forKey: "fallbackMaxSteps") }
+    }
+
+    @Published var fallbackMaxSeconds: Double {
+        didSet { UserDefaults.standard.set(fallbackMaxSeconds, forKey: "fallbackMaxSeconds") }
+    }
+
     @Published var listeningMode: ListeningMode {
         didSet { UserDefaults.standard.set(listeningMode.rawValue, forKey: "listeningMode") }
     }
@@ -202,6 +210,8 @@ final class Config: ObservableObject {
         self.deepSeekThinking = DeepSeekThinking(
             rawValue: defaults.string(forKey: "deepSeekThinking") ?? ""
         ) ?? .off
+        self.fallbackMaxSteps = defaults.object(forKey: "fallbackMaxSteps") as? Int ?? 6
+        self.fallbackMaxSeconds = defaults.object(forKey: "fallbackMaxSeconds") as? Double ?? 30
         self.listeningMode = ListeningMode(
             rawValue: defaults.string(forKey: "listeningMode") ?? ""
         ) ?? .toggle

@@ -1,5 +1,6 @@
 import XCTest
 @testable import JevVoiceCore
+@testable import JevVoice
 
 final class CommandInterpreterTests: XCTestCase {
     func testPropagatesBrowserContextToLaterWebSearch() {
@@ -11,6 +12,32 @@ final class CommandInterpreterTests: XCTestCase {
         let propagated = CommandInterpreter.propagateContext(decisions)
 
         XCTAssertEqual(propagated[1].targetApp, "Google Chrome")
+    }
+
+    @MainActor
+    func testActionlessSystemReroutesToFrontmostUITaskOnly() {
+        let rerouted = VoiceController.rerouteActionlessSystems(
+            [
+                Decision(
+                    clause: "open notifications",
+                    action: .system,
+                    systemAction: SystemAction.none,
+                    confidence: 0.83
+                ),
+                Decision(
+                    clause: "turn volume up",
+                    action: .system,
+                    systemAction: .volumeUp,
+                    confidence: 0.9
+                ),
+                Decision(clause: "unclear", action: .none, confidence: 0.9),
+            ],
+            targetApp: "Google Chrome"
+        )
+        XCTAssertEqual(rerouted[0].action, Action.uiTask)
+        XCTAssertEqual(rerouted[0].targetApp, "Google Chrome")
+        XCTAssertEqual(rerouted[1].action, Action.system)
+        XCTAssertEqual(rerouted[2].action, Action.none)
     }
 
     func testDoesNotPropagateNonBrowserContext() {

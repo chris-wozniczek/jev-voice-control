@@ -81,9 +81,10 @@ public enum SlotExtractor {
         let fillerWords = ["prompt", "message", "text", "following"]
         let fillerPrefixes = (
             fillerWords
-                + ["the", "a", "this"].flatMap { article in
+                + ["the", "a"].flatMap { article in
                     fillerWords.map { "\(article) \($0)" }
                 }
+                + ["this prompt", "this message"]
         ).sorted { $0.count > $1.count }
         if let filler = fillerPrefixes.first(where: { candidate in
             guard let match = text.range(of: candidate, options: .caseInsensitive),
