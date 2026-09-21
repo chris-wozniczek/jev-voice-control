@@ -20,6 +20,7 @@ public struct LearnedToolArgument: Codable, Equatable {
 }
 
 public struct LearnedTool: Codable, Equatable, Identifiable {
+    public typealias Argument = LearnedToolArgument
     public let name: String
     public let description: String
     public let language: String
@@ -54,58 +55,65 @@ public struct LearnedTool: Codable, Equatable, Identifiable {
         self.utteranceExamples = utteranceExamples
     }
 
-    public static func render(script: String, args: [String: String]) -> String {
+    public static func render(
+        script: String,
+        args: [String: String],
+        arguments: [LearnedTool.Argument]
+    ) -> String {
         var rendered = script
+        let declarations = Dictionary(uniqueKeysWithValues: arguments.map { ($0.name, $0) })
+        let comparisonPattern = #"\{\{([A-Za-z0-9_]+)\s*==\s*([^}]+)\}\}"#
+        if let regex = try? NSRegularExpression(pattern: comparisonPattern) {
+            let range = NSRange(location: 0, length: (rendered as NSString).length)
+            for match in regex.matches(in: rendered, range: range).reversed() {
+                guard match.numberOfRanges == 3,
+                      let nameRange = Range(match.range(at: 1), in: rendered),
+                      let expectedRange = Range(match.range(at: 2), in: rendered),
+                      let value = args[String(rendered[nameRange])] else {
+                    continue
+                }
+                let expected = String(rendered[expectedRange])
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                let replacement = value.caseInsensitiveCompare(expected) == .orderedSame
+                    ? "true"
+                    : "false"
+                guard let fullRange = Range(match.range, in: rendered) else { continue }
+                rendered.replaceSubrange(fullRange, with: replacement)
+            }
+        }
         for (name, value) in args {
-            let escaped = value
-                .replacingOccurrences(of: "\\", with: "\\\\")
-                .replacingOccurrences(of: "\"", with: "\\\"")
+            let declaration = declarations[name]
+            let replacement: String
+            switch declaration?.type.lowercased() {
+            case "number":
+                replacement = Double(value) == nil ? quoted(value) : value
+            case "boolean":
+                let normalized = value.lowercased()
+                replacement = ["true", "false"].contains(normalized)
+                    ? normalized
+                    : quoted(value)
+            case "enum", "string", nil:
+                replacement = quoted(value)
+            default:
+                replacement = quoted(value)
+            }
             rendered = rendered.replacingOccurrences(
                 of: "{{\(name)}}",
-                with: "\"\(escaped)\""
+                with: replacement
             )
-            rendered = rendered.replacingOccurrences(
-                of: "{{\(name) == on}}",
-                with: value.caseInsensitiveCompare("on") == .orderedSame ? "true" : "false"
-            )
-            rendered = rendered.replacingOccurrences(
-                of: "{{\(name) == off}}",
-                with: value.caseInsensitiveCompare("off") == .orderedSame ? "true" : "false"
-            )
-            rendered = rendered.replacingOccurrences(
-                of: "{{\(name) == true}}",
-                with: value.caseInsensitiveCompare("true") == .orderedSame ? "true" : "false"
-            )
-            rendered = rendered.replacingOccurrences(
-                of: "{{\(name) == false}}",
-                with: value.caseInsensitiveCompare("false") == .orderedSame ? "true" : "false"
-            )
-            if Double(value) != nil || value == "true" || value == "false" {
-                rendered = rendered.replacingOccurrences(of: "\"\(escaped)\"", with: value)
-            }
-        }
-        let pattern = #"\{\{([A-Za-z0-9_]+)\s*==\s*([^}]+)\}\}"#
-        guard let regex = try? NSRegularExpression(pattern: pattern) else {
-            return rendered
-        }
-        let range = NSRange(location: 0, length: (rendered as NSString).length)
-        let matches = regex.matches(in: rendered, range: range).reversed()
-        for match in matches {
-            guard match.numberOfRanges == 3,
-                  let nameRange = Range(match.range(at: 1), in: rendered),
-                  let expectedRange = Range(match.range(at: 2), in: rendered),
-                  let value = args[String(rendered[nameRange])] else {
-                continue
-            }
-            let expected = String(rendered[expectedRange])
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-            let replacement = value.caseInsensitiveCompare(expected) == .orderedSame
-                ? "true"
-                : "false"
-            guard let fullRange = Range(match.range, in: rendered) else { continue }
-            rendered.replaceSubrange(fullRange, with: replacement)
         }
         return rendered
+    }
+
+    public static func render(script: String, args: [String: String]) -> String {
+        render(script: script, args: args, arguments: [])
+    }
+
+    private static func quoted(_ value: String) -> String {
+        let escaped = value
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "\"", with: "\\\"")
+        return "\"\(escaped)\""
     }
 }
 

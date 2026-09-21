@@ -104,7 +104,11 @@ struct ToolSynthesizer {
             return reason
         }
         guard let policy else { return nil }
-        let rendered = LearnedTool.render(script: tool.script, args: sampleArguments(tool))
+        let rendered = LearnedTool.render(
+            script: tool.script,
+            args: sampleArguments(tool),
+            arguments: tool.arguments
+        )
         for rule in policy.blocked {
             guard let regex = try? NSRegularExpression(
                 pattern: rule.pattern,
@@ -130,7 +134,11 @@ struct ToolSynthesizer {
         defer { try? FileManager.default.removeItem(at: directory) }
         do {
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-            try LearnedTool.render(script: tool.script, args: args).write(
+            try LearnedTool.render(
+                script: tool.script,
+                args: args,
+                arguments: tool.arguments
+            ).write(
                 to: source,
                 atomically: true,
                 encoding: .utf8

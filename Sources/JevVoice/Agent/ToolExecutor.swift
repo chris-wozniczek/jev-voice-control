@@ -50,13 +50,10 @@ struct ToolExecutor {
                     .trimmingCharacters(in: .whitespaces)
             case "boolean":
                 let lowered = transcript.lowercased()
-                if lowered.contains("true") || lowered.contains(" on") || lowered.hasSuffix("on") {
-                    values[argument.name] = "true"
-                } else if lowered.contains("false") || lowered.contains(" off") || lowered.hasSuffix("off") {
-                    values[argument.name] = "false"
-                } else {
+                guard let boolean = Self.lastBooleanValue(in: lowered) else {
                     return .failure("I need a \(argument.name)")
                 }
+                values[argument.name] = boolean
             default:
                 guard let text = Self.stringArgument(
                     name: argument.name,
@@ -119,7 +116,11 @@ struct ToolExecutor {
         rounds: Int = 1
     ) async -> LearnedToolResult<String> {
         let started = Date()
-        let rendered = LearnedTool.render(script: tool.script, args: args)
+        let rendered = LearnedTool.render(
+            script: tool.script,
+            args: args,
+            arguments: tool.arguments
+        )
         if let reason = ToolPolicyScanner.rejectionReason(
             script: rendered,
             transcript: transcript
@@ -152,7 +153,11 @@ struct ToolExecutor {
             if let verifyScript = tool.verifyScript {
                 verifyOutput = try await run(
                     language: tool.language,
-                    script: LearnedTool.render(script: verifyScript, args: args),
+                    script: LearnedTool.render(
+                        script: verifyScript,
+                        args: args,
+                        arguments: tool.arguments
+                    ),
                     timeout: 15
                 ).stdout
                 if let jev {
@@ -183,6 +188,24 @@ struct ToolExecutor {
         args.reduce(template) { result, pair in
             result.replacingOccurrences(of: "{{\(pair.key)}}", with: pair.value)
         }
+    }
+
+    private static func lastBooleanValue(in text: String) -> String? {
+        let patterns: [(String, String)] = [
+            (#"\b(on|enable|true)\b"#, "true"),
+            (#"\b(off|disable|false)\b"#, "false"),
+        ]
+        var latest: (offset: Int, value: String)?
+        for (pattern, value) in patterns {
+            guard let regex = try? NSRegularExpression(pattern: pattern) else { continue }
+            let range = NSRange(location: 0, length: (text as NSString).length)
+            for match in regex.matches(in: text, range: range) {
+                if latest == nil || match.range.location > latest!.offset {
+                    latest = (match.range.location, value)
+                }
+            }
+        }
+        return latest?.value
     }
 
     private static func verify(

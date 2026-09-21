@@ -8,11 +8,31 @@ final class LearnedToolTests: XCTestCase {
         let script = "set value {{text}} and number {{amount}} and flag {{state == on}}"
         let rendered = LearnedTool.render(
             script: script,
-            args: ["text": "say \"hi\"", "amount": "42", "state": "on"]
+            args: ["text": "say \"hi\"", "amount": "42", "state": "on"],
+            arguments: [
+                LearnedTool.Argument(name: "text", type: "string"),
+                LearnedTool.Argument(name: "amount", type: "number"),
+                LearnedTool.Argument(name: "state", type: "enum", values: ["on", "off"]),
+            ]
         )
         XCTAssertEqual(
             rendered,
             #"set value "say \"hi\"" and number 42 and flag true"#
+        )
+    }
+
+    func testRenderKeepsInvalidNumbersAndNumericStringsQuoted() {
+        let toolArguments = [
+            LearnedTool.Argument(name: "amount", type: "number"),
+            LearnedTool.Argument(name: "text", type: "string"),
+        ]
+        XCTAssertEqual(
+            LearnedTool.render(
+                script: "number {{amount}} text {{text}}",
+                args: ["amount": "remind me to 2", "text": "2"],
+                arguments: toolArguments
+            ),
+            #"number "remind me to 2" text "2""#
         )
     }
 
@@ -76,7 +96,8 @@ final class LearnedToolTests: XCTestCase {
                         script: tool.script,
                         args: Dictionary(uniqueKeysWithValues: tool.arguments.map {
                             ($0.name, $0.type == "number" ? "10" : ($0.values?.first ?? "sample"))
-                        })
+                        }),
+                        arguments: tool.arguments
                     ),
                     transcript: tool.utteranceExamples.first ?? ""
                 ),
@@ -95,7 +116,8 @@ final class LearnedToolTests: XCTestCase {
                 script: tool.script,
                 args: Dictionary(uniqueKeysWithValues: tool.arguments.map {
                     ($0.name, $0.type == "number" ? "10" : ($0.values?.first ?? "sample"))
-                })
+                }),
+                arguments: tool.arguments
             ).write(to: source, atomically: true, encoding: .utf8)
             let process = Process()
             process.executableURL = URL(fileURLWithPath: "/usr/bin/osacompile")
