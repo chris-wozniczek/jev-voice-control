@@ -17,6 +17,8 @@ enum ExecutorError: Error, LocalizedError {
 }
 
 enum Executor {
+    static let noFocusedFieldMessage = "Nothing to type into — click where the text should go first"
+
     @MainActor
     static func execute(
         _ decision: Decision,
@@ -258,18 +260,18 @@ enum Executor {
             application = NSWorkspace.shared.frontmostApplication
         }
         if frontmostApp != nil, application == nil {
-            return "Nothing to type into — click where the text should go first"
+            return noFocusedFieldMessage
         }
         guard let application,
               application.bundleIdentifier != ownBundleID,
               await KeyboardFocus.bringToFront(pid: application.processIdentifier) else {
-            return "Nothing to type into — click where the text should go first"
+            return noFocusedFieldMessage
         }
         let pid = application.processIdentifier
         if TextEntry.focusedTextInput(pid: pid) == nil,
            !TextEntry.focusTextElementIfNeeded(pid: pid),
            TextEntry.focusedTextInput(pid: pid) == nil {
-            return "Nothing to type into — click where the text should go first"
+            return noFocusedFieldMessage
         }
         let pasteboard = NSPasteboard.general
         let saved: [NSPasteboardItem] = (pasteboard.pasteboardItems ?? []).map { item in

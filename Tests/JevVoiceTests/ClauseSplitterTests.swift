@@ -70,6 +70,21 @@ final class ClauseSplitterCandidateTests: XCTestCase {
         XCTAssertTrue(ClauseSplitter.candidateBoundaries("type open the door").isEmpty)
     }
 
+    func testDictationKeepsPunctuationAndCommandLookingWordsAsContent() {
+        XCTAssertEqual(
+            ClauseSplitter.split("type the prompt. Check RAM usage"),
+            ["type the prompt. Check RAM usage"]
+        )
+        XCTAssertEqual(
+            ClauseSplitter.split("type in the prompt box, check around music"),
+            ["type in the prompt box, check around music"]
+        )
+        XCTAssertEqual(
+            ClauseSplitter.split("open Notes and then type hello, how are you. See you"),
+            ["open Notes", "type hello, how are you. See you"]
+        )
+    }
+
     func testSplitsAtCommaBoundary() {
         let transcript = "open cmux, type grok"
         let boundaries = ClauseSplitter.candidateBoundaries(transcript)

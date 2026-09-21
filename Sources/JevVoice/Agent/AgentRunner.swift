@@ -51,6 +51,7 @@ final class AgentRunner: ObservableObject {
     private var currentGoal = ""
     private var confirmationContinuation: CheckedContinuation<Bool, Never>?
     private var cancellationRequested = false
+    private var runGeneration = 0
     private var cachedApps: [CuaApp]?
     private var idleShutdownTask: Task<Void, Never>?
     private var plannerSeconds = 0.0
@@ -108,7 +109,16 @@ final class AgentRunner: ObservableObject {
         context: AgentContext = AgentContext(),
         planner: ActionPlanner
     ) async -> AgentOutcome {
+        runGeneration += 1
+        let generation = runGeneration
+        let wasRunning = isRunning
         cancelActiveRun()
+        if wasRunning {
+            let deadline = Date().addingTimeInterval(3)
+            while isRunning && Date() < deadline {
+                try? await Task.sleep(for: .milliseconds(50))
+            }
+        }
         idleShutdownTask?.cancel()
         steps = []
         isRunning = true
@@ -129,17 +139,19 @@ final class AgentRunner: ObservableObject {
         )
         var outcomeDescription = "unknown"
         defer {
-            isRunning = false
-            pendingConfirmation = false
             let total = Date().timeIntervalSince(runStarted)
             Log.agent.info(
                 "run totals total=\(total) planner=\(self.plannerSeconds) cua=\(self.cuaSeconds) steps=\(self.steps.count)"
             )
             Log.agent.info("outcome=\(outcomeDescription, privacy: .public)")
-            idleShutdownTask = Task { @MainActor [weak self] in
-                try? await Task.sleep(for: .seconds(90))
-                guard let self, !self.isRunning else { return }
-                CuaDriver.shared.shutdown()
+            if generation == runGeneration {
+                isRunning = false
+                pendingConfirmation = false
+                idleShutdownTask = Task { @MainActor [weak self] in
+                    try? await Task.sleep(for: .seconds(90))
+                    guard let self, !self.isRunning else { return }
+                    CuaDriver.shared.shutdown()
+                }
             }
         }
         lastPID = nil
@@ -224,10 +236,15 @@ final class AgentRunner: ObservableObject {
 
         do {
             while Date() < deadline {
-                if cancellationRequested { throw AgentError.cancelled }
+                guard generation == runGeneration, !cancellationRequested else {
+                    throw AgentError.cancelled
+                }
                 try Task.checkCancellation()
                 guard callCount < 25 else { throw AgentError.budget }
                 let turn = try await plannerNext(effectivePlanner, context: plannerContext)
+                guard generation == runGeneration, !cancellationRequested else {
+                    throw AgentError.cancelled
+                }
                 plannerContext.messages.append(turn.assistant)
                 guard let call = turn.toolCalls.first else {
                     throw AgentError.api("The planner did not choose an action")
@@ -412,6 +429,7 @@ final class AgentRunner: ObservableObject {
     }
 
     func cancel() {
+        runGeneration += 1
         cancelActiveRun()
         CuaDriver.shared.shutdown()
         isRunning = false

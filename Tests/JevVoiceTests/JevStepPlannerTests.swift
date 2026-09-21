@@ -59,6 +59,117 @@ final class JevStepPlannerTests: XCTestCase {
     }
 
     @MainActor
+    func testCreationClickWithChangedSnapshotReturnsDoneWithoutSecondClick() async throws {
+        let fake = FakeJev(answer: .choice(choice: "e1", confidence: 0.9, probabilities: ["e1": 0.9]))
+        let planner = JevStepPlanner(client: fake, canEscalate: false)
+        let before = snapshot([
+            CuaElement(token: "new", role: "AXButton", label: "New session", value: nil),
+        ])
+        let after = snapshot([
+            CuaElement(token: "field", role: "AXTextArea", label: "Prompt", value: nil),
+        ])
+        _ = try await planner.next(PlannerContext(
+            goal: "Open new session",
+            targetApp: "Devin",
+            snapshot: before
+        ))
+        let turn = try await planner.next(PlannerContext(
+            goal: "Open new session",
+            targetApp: "Devin",
+            snapshot: after,
+            history: [
+                PlannerStepRecord(
+                    tool: "click",
+                    argsSummary: "",
+                    resultText: "clicked",
+                    succeeded: true,
+                    elementLabel: "New session"
+                ),
+            ],
+            stepIndex: 1
+        ))
+        XCTAssertEqual(turn.toolCalls.first?.name, "done")
+    }
+
+    @MainActor
+    func testCommandWDoesNotSatisfyOpenGoalAsCreation() async throws {
+        let fake = FakeJev(answer: .choice(choice: "e1", confidence: 0.9, probabilities: ["e1": 0.9]))
+        let planner = JevStepPlanner(client: fake, canEscalate: false)
+        _ = try await planner.next(PlannerContext(
+            goal: "open settings",
+            snapshot: snapshot([
+                CuaElement(token: "old", role: "AXButton", label: "Old", value: nil),
+            ])
+        ))
+        let turn = try await planner.next(PlannerContext(
+            goal: "open settings",
+            snapshot: snapshot([
+                CuaElement(token: "settings", role: "AXButton", label: "Settings", value: nil),
+            ]),
+            history: [
+                PlannerStepRecord(
+                    tool: "press_key",
+                    argsSummary: "key=w modifiers=command",
+                    resultText: "Pressed command-w",
+                    succeeded: true
+                ),
+            ],
+            stepIndex: 1
+        ))
+        XCTAssertNotEqual(turn.toolCalls.first?.name, "done")
+        XCTAssertNotNil(fake.questions["next_action"])
+    }
+
+    @MainActor
+    func testNonCreationGoalSkipsNewControlAndTypesGeneratedText() async throws {
+        let fake = FakeJev(answer: .choice(choice: "e1", confidence: 0.62, probabilities: ["e1": 0.9]))
+        let planner = JevStepPlanner(client: fake, canEscalate: false)
+        let turn = try await planner.next(PlannerContext(
+            goal: "3 bullet points inside the note",
+            generatedText: "• a\n• b\n• c",
+            snapshot: snapshot([
+                CuaElement(token: "new", role: "AXButton", label: "New Note", value: nil),
+                CuaElement(token: "field", role: "AXTextArea", label: "", value: nil),
+            ])
+        ))
+        XCTAssertEqual(turn.toolCalls.first?.name, "type_text")
+        XCTAssertEqual(turn.toolCalls.first?.arguments["text"]?.stringValue, "• a\n• b\n• c")
+        XCTAssertEqual(turn.toolCalls.first?.arguments["element_token"]?.stringValue, "field")
+    }
+
+    @MainActor
+    func testUnchangedCreationScreenExcludesAlreadyClickedControl() async throws {
+        let fake = FakeJev(answer: .choice(choice: "e1", confidence: 0.9, probabilities: ["e1": 0.9]))
+        let planner = JevStepPlanner(client: fake, canEscalate: false)
+        let current = snapshot([
+            CuaElement(token: "new", role: "AXButton", label: "New Note", value: nil),
+            CuaElement(token: "field", role: "AXTextArea", label: "", value: nil),
+        ])
+        _ = try await planner.next(PlannerContext(
+            goal: "Create a new note",
+            snapshot: current
+        ))
+        let turn = try await planner.next(PlannerContext(
+            goal: "Create a new note",
+            snapshot: current,
+            history: [
+                PlannerStepRecord(
+                    tool: "click",
+                    argsSummary: "",
+                    resultText: "clicked",
+                    succeeded: true,
+                    elementLabel: "New Note"
+                ),
+            ],
+            stepIndex: 1
+        ))
+        XCTAssertNotEqual(
+            turn.toolCalls.first?.arguments["element_token"]?.stringValue,
+            "new"
+        )
+    }
+
+    @MainActor
     func testHintsAddWorkedBeforeContextAndCriteria() async throws {
         let fake = FakeJev(answer: .choice(choice: "e1", confidence: 0.9, probabilities: ["e1": 0.9]))
         let hints = HintStore(url: FileManager.default.temporaryDirectory
@@ -110,7 +221,7 @@ final class JevStepPlannerTests: XCTestCase {
             .appendingPathComponent("jev-planner-hints-\(UUID().uuidString).json"))
         hints.record(app: "Devin", goal: "open a new session", role: "AXButton", label: "New Session")
         let planner = JevStepPlanner(client: fake, canEscalate: false, hints: hints)
-        _ = try await planner.next(PlannerContext(
+        let turn = try await planner.next(PlannerContext(
             goal: "open a new session",
             targetApp: "Devin",
             snapshot: snapshot([
@@ -128,11 +239,7 @@ final class JevStepPlannerTests: XCTestCase {
             ]
         ))
 
-        let state = try XCTUnwrap(fake.states.first?.objectValue)
-        XCTAssertEqual(state["worked_before"]?.arrayValue?.count, 0)
-        let criteria = try XCTUnwrap(fake.questions["next_action"]?.choiceCriteria)
-        let e1Criteria = try XCTUnwrap(criteria["e1"] ?? nil)
-        XCTAssertFalse(e1Criteria.contains("worked before"))
+        XCTAssertNotEqual(turn.toolCalls.first?.name, "click")
     }
 
     @MainActor

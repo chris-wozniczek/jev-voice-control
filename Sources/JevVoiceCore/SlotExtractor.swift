@@ -135,8 +135,110 @@ public enum SlotExtractor {
                 text = text.trimmingCharacters(in: .whitespacesAndNewlines)
             }
         }
+        text = stripLeadingDictationTarget(from: text)
+        text = stripTrailingDictationTarget(from: text)
         text = text.trimmingCharacters(in: .whitespacesAndNewlines)
         return text.isEmpty ? nil : text
+    }
+
+    public static func deferredDictation(
+        from transcript: String,
+        installedApps: [String],
+        aliases: [String: String]
+    ) -> (text: String, targetApp: String?)? {
+        let trimmed = transcript.trimmingCharacters(in: .whitespacesAndNewlines)
+        let pattern = #"^(.*?)\s+(?:type|write|enter|put)\s+(?:that|this|it)\s+(?:in|into)\s+(.+)$"#
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: .caseInsensitive),
+              let match = regex.firstMatch(
+                in: trimmed,
+                range: NSRange(location: 0, length: (trimmed as NSString).length)
+              ),
+              let contentRange = Range(match.range(at: 1), in: trimmed),
+              let targetRange = Range(match.range(at: 2), in: trimmed) else {
+            return nil
+        }
+        let target = String(trimmed[targetRange])
+            .trimmingCharacters(in: CharacterSet.whitespacesAndNewlines.union(.punctuationCharacters))
+        guard target.range(
+            of: #"\b(?:prompt|message|text|note|input|search|chat)\b.*\b(?:box|field|area|bar)\b$"#,
+            options: [.regularExpression, .caseInsensitive]
+        ) != nil else {
+            return nil
+        }
+        var content = String(trimmed[contentRange])
+            .replacingOccurrences(
+                of: #"\b(?:uh|um|erm)\b[,\s]*"#,
+                with: " ",
+                options: [.regularExpression, .caseInsensitive]
+            )
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        var targetApp: String?
+        let prefixPatterns = [
+            #"^(?:in|inside|on)\s+(?:the\s+)?(.+?)\s+(?:session|window|app)\s*,?\s*"#,
+            #"^(?:in|inside|on)\s+(?:the\s+)?(.+?)\s*,\s*"#,
+        ]
+        for pattern in prefixPatterns {
+            guard let prefixRegex = try? NSRegularExpression(
+                pattern: pattern,
+                options: [.caseInsensitive]
+            ),
+            let prefixMatch = prefixRegex.firstMatch(
+                in: content,
+                range: NSRange(location: 0, length: (content as NSString).length)
+            ),
+            let appRange = Range(prefixMatch.range(at: 1), in: content),
+            let fullRange = Range(prefixMatch.range, in: content) else {
+                continue
+            }
+            let appPhrase = String(content[appRange]).trimmingCharacters(in: .whitespacesAndNewlines)
+            if let appMatch = AppMatcher.match(
+                clause: appPhrase,
+                installedApps: installedApps,
+                aliases: aliases
+            ) {
+                targetApp = appMatch.app
+                content = String(content[fullRange.upperBound...])
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                break
+            }
+        }
+        guard !content.isEmpty else { return nil }
+        return (content, targetApp)
+    }
+
+    private static func stripLeadingDictationTarget(from text: String) -> String {
+        let pattern = #"^(?:in|into|inside)?\s*(?:the|a|this)?\s*(?:prompt|message|text|note|input|search|chat)?\s*(?:box|field|area|bar)?\s*[:,.\-—]*\s*"#
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: .caseInsensitive),
+              let match = regex.firstMatch(
+                  in: text,
+                  range: NSRange(location: 0, length: (text as NSString).length)
+              ),
+              let range = Range(match.range, in: text) else {
+            return text
+        }
+        let matched = String(text[range]).lowercased()
+        let hasBoxWord = matched.range(
+            of: #"\b(?:box|field|area|bar)\b"#,
+            options: .regularExpression
+        ) != nil
+        let hasPromptWord = matched.range(
+            of: #"\bprompt\b"#,
+            options: .regularExpression
+        ) != nil
+        let hasPunctuation = matched.contains { ":,.-—".contains($0) }
+        guard hasBoxWord || hasPromptWord || hasPunctuation else {
+            return text
+        }
+        return String(text[range.upperBound...]).trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private static func stripTrailingDictationTarget(from text: String) -> String {
+        text.replacingOccurrences(
+            of: #"\s*,?\s*(?:in|into|inside)\s+(?:the|a|this)?\s*(?:prompt|message|text|note|input|search|chat)?\s*(?:box|field|area|bar)\s*$"#,
+            with: "",
+            options: [.regularExpression, .caseInsensitive]
+        )
+        .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     public static func composeRequest(from clause: String) -> String? {

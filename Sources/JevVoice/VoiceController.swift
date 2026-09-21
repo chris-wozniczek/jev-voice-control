@@ -159,6 +159,7 @@ final class VoiceController: ObservableObject {
         case .listening:
             recognizer.stop()
         case .executing:
+            AgentRunner.shared.cancel()
             startListening()
         case .idle, .done, .error:
             startListening()
@@ -246,6 +247,13 @@ final class VoiceController: ObservableObject {
                 result,
                 targetApp: lastExternalFrontmostApp
             )
+            let droppedDictationCount = result.count
+            result.removeAll {
+                $0.action == .dictate && $0.text == nil && !$0.composes
+            }
+            if result.count != droppedDictationCount {
+                Log.command.info("command: dropped dictate without text")
+            }
             decisions = result
             history = (result + history).prefix(10).map { $0 }
         } catch {
@@ -634,9 +642,38 @@ final class VoiceController: ObservableObject {
                 let result = try await Executor.execute(
                     decision,
                     frontmostApp: decision.siteHost == nil
-                        ? lastExternalFrontmostApp
+                        ? (decision.action == .dictate && decision.targetApp != nil
+                            ? decision.targetApp : lastExternalFrontmostApp)
                         : decision.targetApp
                 )
+                if decision.action == .dictate,
+                   result == Executor.noFocusedFieldMessage,
+                   config.computerUseEnabled,
+                   agentAvailable {
+                    let outcome = await AgentRunner.shared.run(
+                        goal: decision.clause,
+                        context: AgentContext(
+                            frontmostApp: decision.targetApp ?? lastExternalFrontmostApp,
+                            generatedText: decision.text,
+                            preConfirmed: preConfirmed
+                        )
+                    )
+                    switch outcome {
+                    case .done(let summary):
+                        results.append(summary)
+                        previousAction = .uiTask
+                    case .failed(let reason):
+                        status = .error(reason)
+                        await speakIfEnabled(reason)
+                        completeTask()
+                        return
+                    case .cancelled:
+                        status = .idle
+                        completeTask()
+                        return
+                    }
+                    continue
+                }
                 if decision.action == .dictate, decision.composes, decision.generatedText != nil {
                     let words = decision.generatedText?
                         .split(whereSeparator: { $0.isWhitespace || $0.isNewline }).count ?? 0

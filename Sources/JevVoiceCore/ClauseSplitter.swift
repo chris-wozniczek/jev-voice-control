@@ -98,12 +98,10 @@ public enum ClauseSplitter {
             let location = candidate.boundary.location
             if seenLocations.contains(location) { continue }
             switch candidate.kind {
-            case .punctuation(let punctuation):
+            case .punctuation:
+                guard !dictationActive else { continue }
                 result.append(candidate.boundary)
                 seenLocations.insert(location)
-                if punctuation == "," || punctuation == ";" || punctuation == "." {
-                    dictationActive = false
-                }
                 if let word = words.first(where: { $0.range.location == location }) {
                     dictationActive = dictationVerbs.contains(word.value)
                 }
