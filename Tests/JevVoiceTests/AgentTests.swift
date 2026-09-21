@@ -74,7 +74,8 @@ final class AgentTests: XCTestCase {
     }
 
     func testDestructiveWordMatching() {
-        XCTAssertTrue(AgentRisk.matchesDestructiveWord("Submit order"))
+        XCTAssertFalse(AgentRisk.matchesDestructiveWord("Submit order"))
+        XCTAssertTrue(AgentRisk.matchesBrowserRisk("Submit order"))
         XCTAssertTrue(AgentRisk.matchesDestructiveWord("Delete this message"))
         XCTAssertFalse(AgentRisk.matchesDestructiveWord("Open the settings"))
     }

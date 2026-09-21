@@ -77,6 +77,25 @@ final class JevStepPlannerTests: XCTestCase {
     }
 
     @MainActor
+    func testDictationCandidatesExcludeRowsAndChooseTextArea() async throws {
+        let fake = FakeJev(
+            answer: .choice(choice: "e1", confidence: 0.9, probabilities: ["e1": 0.9])
+        )
+        let planner = JevStepPlanner(client: fake, canEscalate: false)
+        let turn = try await planner.next(PlannerContext(
+            goal: "type hello",
+            snapshot: snapshot([
+                CuaElement(token: "row", role: "AXRow", label: "Hello", value: nil),
+                CuaElement(token: "button", role: "AXButton", label: "Hello", value: nil),
+                CuaElement(token: "e1", role: "AXTextArea", label: "Message", value: nil),
+                CuaElement(token: "ocr:1", role: "AXStaticText", label: "Hello", value: nil),
+            ])
+        ))
+        XCTAssertEqual(turn.toolCalls.first?.name, "type_text")
+        XCTAssertEqual(turn.toolCalls.first?.arguments["element_token"]?.stringValue, "e1")
+    }
+
+    @MainActor
     func testCreationClickWithChangedSnapshotReturnsDoneWithoutSecondClick() async throws {
         let fake = FakeJev(answer: .choice(choice: "e1", confidence: 0.9, probabilities: ["e1": 0.9]))
         let planner = JevStepPlanner(client: fake, canEscalate: false)
@@ -597,7 +616,7 @@ final class JevStepPlannerTests: XCTestCase {
     }
 
     @MainActor
-    func testElectronLikeSnapshotWithUnobservableValueCanReturnDone() async throws {
+    func testElectronLikeSnapshotWithUnobservableValueRequiresVerification() async throws {
         let fake = FakeJev(
             answer: .choice(choice: "done", confidence: 0.9, probabilities: ["done": 0.9]),
             goalReached: 0.9
@@ -618,7 +637,7 @@ final class JevStepPlannerTests: XCTestCase {
             ],
             stepIndex: 1
         ))
-        XCTAssertEqual(turn.toolCalls.first?.name, "done")
+        XCTAssertEqual(turn.toolCalls.first?.name, "observe")
     }
 
     @MainActor
@@ -754,6 +773,37 @@ final class JevStepPlannerTests: XCTestCase {
         _ = try await planner.next(context)
         let repeated = try await planner.next(context)
         XCTAssertEqual(repeated.toolCalls.first?.name, "fail")
+    }
+
+    @MainActor
+    func testStuckRecoveryObservesFullyBeforeWakeOCRAndEscalation() async throws {
+        let fake = FakeJev()
+        let planner = JevStepPlanner(client: fake, canEscalate: true)
+        let context = PlannerContext(
+            goal: "open settings",
+            targetApp: "Safari",
+            snapshot: CuaSnapshot(
+                snapshotId: "ax",
+                treeMarkdown: "",
+                elements: [
+                    CuaElement(token: "button", role: "AXButton", label: "Settings", value: nil),
+                ],
+                image: nil,
+                source: .ax
+            )
+        )
+
+        let fullObserve = try await planner.next(context)
+        XCTAssertEqual(fullObserve.toolCalls.first?.arguments["full"]?.boolValue, true)
+        let wake = try await planner.next(context)
+        XCTAssertEqual(wake.toolCalls.first?.arguments["wake"]?.boolValue, true)
+        let forcedOCR = try await planner.next(context)
+        XCTAssertEqual(forcedOCR.toolCalls.first?.arguments["force_ocr"]?.boolValue, true)
+        let escalated = try await planner.next(context)
+        guard case .toDeepSeek = escalated.escalation else {
+            XCTFail("Expected escalation after full observe, wake, and forced OCR")
+            return
+        }
     }
 
     @MainActor

@@ -112,6 +112,11 @@ public enum SlotExtractor {
             text.removeFirst()
             text = text.trimmingCharacters(in: .whitespacesAndNewlines)
         }
+        let strippedLeadingTarget = stripLeadingDictationTarget(from: text)
+        var didStripLeadingTarget = strippedLeadingTarget != text
+        if strippedLeadingTarget != text {
+            text = strippedLeadingTarget
+        }
         let fillerWords = ["prompt", "message", "text", "following"]
         let fillerPrefixes = (
             fillerWords
@@ -135,7 +140,18 @@ public enum SlotExtractor {
                 text = text.trimmingCharacters(in: .whitespacesAndNewlines)
             }
         }
-        text = stripLeadingDictationTarget(from: text)
+        let leadingTarget = stripLeadingDictationTarget(from: text)
+        let strippedTarget = leadingTarget != text
+        didStripLeadingTarget = didStripLeadingTarget || strippedTarget
+        text = leadingTarget
+        if didStripLeadingTarget,
+           text.range(of: #"^to\s+"#, options: [.regularExpression, .caseInsensitive]) != nil {
+            text = text.replacingOccurrences(
+                of: #"^to\s+"#,
+                with: "",
+                options: [.regularExpression, .caseInsensitive]
+            )
+        }
         text = stripTrailingDictationTarget(from: text)
         text = text.trimmingCharacters(in: .whitespacesAndNewlines)
         return text.isEmpty ? nil : text
@@ -207,7 +223,7 @@ public enum SlotExtractor {
     }
 
     private static func stripLeadingDictationTarget(from text: String) -> String {
-        let pattern = #"^(?:in|into|inside)?\s*(?:the|a|this)?\s*(?:prompt|message|text|note|input|search|chat)?\s*(?:box|field|area|bar)?\s*[:,.\-—]*\s*"#
+        let pattern = #"^(?:(?:(?:in|into|inside|in to|on)\s+)(?:the\s+|a\s+)?(?:[\w-]+\s+){0,3}?(?:box|field|prompt|input|area|note|editor|bar)|(?:the\s+|a\s+)?(?:prompt|message|text|note|input|search|chat)(?:\s+(?:box|field|area|bar))?)\s*[,:\.\-—]?\s*"#
         guard let regex = try? NSRegularExpression(pattern: pattern, options: .caseInsensitive),
               let match = regex.firstMatch(
                   in: text,
@@ -216,6 +232,7 @@ public enum SlotExtractor {
               let range = Range(match.range, in: text) else {
             return text
         }
+        guard match.range.length > 0 else { return text }
         let matched = String(text[range]).lowercased()
         let hasBoxWord = matched.range(
             of: #"\b(?:box|field|area|bar)\b"#,
@@ -226,7 +243,11 @@ public enum SlotExtractor {
             options: .regularExpression
         ) != nil
         let hasPunctuation = matched.contains { ":,.-—".contains($0) }
-        guard hasBoxWord || hasPromptWord || hasPunctuation else {
+        let hasTargetPreposition = matched.range(
+            of: #"^(?:in|into|inside|in to|on)\b"#,
+            options: .regularExpression
+        ) != nil
+        guard hasBoxWord || hasPromptWord || hasPunctuation || hasTargetPreposition else {
             return text
         }
         return String(text[range.upperBound...]).trimmingCharacters(in: .whitespacesAndNewlines)

@@ -50,6 +50,29 @@ final class ClauseSplitterTests: XCTestCase {
             ["open Notes", "create a new note"]
         )
     }
+
+    func testLoneVerbCommaIsKeptInOneClause() {
+        let click = "Click, send"
+        let press = "Press, enter"
+        XCTAssertEqual(
+            ClauseSplitter.split(click, boundaries: ClauseSplitter.candidateBoundaries(click)),
+            ["Click send"]
+        )
+        XCTAssertEqual(
+            ClauseSplitter.split(press, boundaries: ClauseSplitter.candidateBoundaries(press)),
+            ["Press enter"]
+        )
+    }
+
+    func testCommaAfterCommandObjectStillSplits() {
+        XCTAssertEqual(
+            ClauseSplitter.split(
+                "open Notes, then type hello",
+                boundaries: ClauseSplitter.candidateBoundaries("open Notes, then type hello")
+            ),
+            ["open Notes", "type hello"]
+        )
+    }
 }
 
 final class ClauseSplitterNewVerbTests: XCTestCase {

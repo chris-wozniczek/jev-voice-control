@@ -1,9 +1,15 @@
 import ApplicationServices
 import CoreFoundation
 import Foundation
+import JevVoiceCore
 
 enum AXMenuBar {
-    static func pressMenuItem(pid: pid_t, key: String, modifiers: [String]) -> Bool {
+    static func pressMenuItem(
+        pid: pid_t,
+        key: String,
+        modifiers: [String],
+        goal: String? = nil
+    ) -> Bool {
         let app = AXUIElementCreateApplication(pid)
         guard let menuBarValue = attribute(app, kAXMenuBarAttribute as CFString),
               let menuBar = axElement(menuBarValue) else {
@@ -12,9 +18,18 @@ enum AXMenuBar {
         var queue: [(AXUIElement, Int)] = [(menuBar, 0)]
         while let (element, depth) = queue.popLast() {
             guard depth <= 3 else { continue }
-            if matches(element, key: key, modifiers: modifiers),
-               AXUIElementPerformAction(element, kAXPressAction as CFString) == .success {
+            if matches(element, key: key, modifiers: modifiers) {
                 let title = attribute(element, kAXTitleAttribute as CFString) as? String ?? key
+                if let goal,
+                   GoalWords.words(title).isDisjoint(with: GoalWords.words(goal)) {
+                    Log.agent.info(
+                        "stage=menu item=\(title, privacy: .public) skipped=goal-mismatch"
+                    )
+                    return false
+                }
+                guard AXUIElementPerformAction(element, kAXPressAction as CFString) == .success else {
+                    continue
+                }
                 Log.agent.info("stage=menu item=\(title, privacy: .public)")
                 return true
             }

@@ -18,14 +18,17 @@
     }
   ],
   "confirm": [
+    "delete",
+    "remove",
+    "empty trash",
+    "publish",
+    "pay"
+  ],
+  "confirmInBrowser": [
     "send",
     "submit",
     "post",
-    "publish",
     "tweet",
-    "reply",
-    "delete",
-    "remove",
-    "empty trash"
+    "reply"
   ]
 }

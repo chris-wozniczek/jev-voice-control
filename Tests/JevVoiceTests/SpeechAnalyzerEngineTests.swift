@@ -32,6 +32,19 @@ final class SpeechAnalyzerEngineTests: XCTestCase {
         XCTAssertFalse(normalized.contains("SpeechAnalyzer(inputSequence:"))
         XCTAssertEqual(normalized.components(separatedBy: "start(inputSequence:").count - 1, 1)
     }
+
+    func testRestartWaitsForPreviousAnalyzerFinish() throws {
+        let sourceURL = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent("Sources/JevVoice/SpeechAnalyzerEngine.swift")
+        let source = try String(contentsOf: sourceURL, encoding: .utf8)
+        XCTAssertTrue(source.contains("start waiting for previous finish"))
+        XCTAssertTrue(source.contains("await previousFinish.value"))
+        XCTAssertTrue(source.contains("let shouldFinish = self.finishing"))
+        XCTAssertTrue(source.contains("if shouldFinish"))
+    }
 #endif
 
     func testAssembleFinalIncludesLastVolatileText() throws {

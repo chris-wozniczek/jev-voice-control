@@ -14,8 +14,20 @@ public enum ExecutionPolicy {
         policy: SafetyPolicy? = nil,
         transcript: String? = nil
     ) -> Verdict {
+        let browserNames = [
+            "Safari", "Google Chrome", "Chrome", "Arc", "Brave", "Firefox", "Edge",
+        ]
+        let inBrowser = decisions.contains {
+            if let app = $0.targetApp {
+                return browserNames.contains {
+                    app.localizedCaseInsensitiveCompare($0) == .orderedSame
+                }
+            }
+            return false
+        } || decisions.contains(where: { $0.siteHost != nil })
         if let policyVerdict = policy?.verdict(
-            for: transcript ?? decisions.map(\.clause).joined(separator: " ")
+            for: transcript ?? decisions.map(\.clause).joined(separator: " "),
+            inBrowser: inBrowser
         ) {
             switch policyVerdict {
             case .reject(let reason):

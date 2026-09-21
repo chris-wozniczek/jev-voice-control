@@ -59,7 +59,28 @@ final class SpeechAnalyzerEngine: SpeechEngine {
     }
 
     func start() throws {
-        cancel()
+        let previousFinish = finishTask
+        cancel(preserveFinish: true)
+        if let previousFinish {
+            let restartGeneration = generation
+            Log.speech.info("analyzer start waiting for previous finish")
+            setupTask = Task { @MainActor [weak self] in
+                await previousFinish.value
+                guard let self, self.generation == restartGeneration, !Task.isCancelled else {
+                    return
+                }
+                let shouldFinish = self.finishing
+                try? self.beginStart()
+                if shouldFinish {
+                    self.finish()
+                }
+            }
+            return
+        }
+        try beginStart()
+    }
+
+    private func beginStart() throws {
         guard Self.streamingAvailable else {
             Log.speech.info("analyzer unavailable fallback=apple")
             let fallback = AppleSpeechEngine()
@@ -152,6 +173,10 @@ final class SpeechAnalyzerEngine: SpeechEngine {
     }
 
     func cancel() {
+        cancel(preserveFinish: false)
+    }
+
+    private func cancel(preserveFinish: Bool) {
         generation += 1
         setupTask?.cancel()
         setupTask = nil
@@ -161,8 +186,16 @@ final class SpeechAnalyzerEngine: SpeechEngine {
         transcriberTask = nil
         detectorTask?.cancel()
         detectorTask = nil
-        finishTask?.cancel()
-        finishTask = nil
+        if !preserveFinish {
+            finishTask?.cancel()
+            finishTask = nil
+        } else if finishTask == nil, let analyzer {
+            let previousAnalyzer = analyzer
+            finishTask = Task { @MainActor [weak self] in
+                await previousAnalyzer.cancelAndFinishNow()
+                self?.finishTask = nil
+            }
+        }
         finalSilenceTask?.cancel()
         finalSilenceTask = nil
         fallbackSilenceTask?.cancel()

@@ -74,6 +74,22 @@ final class SlotExtractorTests: XCTestCase {
             "check around music"
         )
         XCTAssertEqual(
+            SlotExtractor.dictationText(from: "Type in the prompt box to check CPU"),
+            "check CPU"
+        )
+        XCTAssertEqual(
+            SlotExtractor.dictationText(from: "Type inside the note hello"),
+            "hello"
+        )
+        XCTAssertEqual(
+            SlotExtractor.dictationText(from: "type hello to the editor"),
+            "hello to the editor"
+        )
+        XCTAssertEqual(
+            SlotExtractor.dictationText(from: "Type, check, RAM usage"),
+            "check, RAM usage"
+        )
+        XCTAssertEqual(
             SlotExtractor.dictationText(from: "type check RAM usage in the prompt box"),
             "check RAM usage"
         )

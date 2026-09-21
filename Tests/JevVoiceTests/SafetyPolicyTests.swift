@@ -6,7 +6,8 @@ final class SafetyPolicyTests: XCTestCase {
         blocked: [
             .init(pattern: #"\b(rm -rf|sudo)\b"#, reason: "shell commands are blocked")
         ],
-        confirm: ["send", "close all"]
+        confirm: ["delete", "close all"],
+        confirmInBrowser: ["send"]
     )
 
     func testBlockedPatternRejects() {
@@ -16,14 +17,21 @@ final class SafetyPolicyTests: XCTestCase {
         )
     }
 
-    func testConfirmWordConfirms() {
+    func testBrowserConfirmWordIsScoped() {
+        XCTAssertNil(policy.verdict(for: "send the message"))
         XCTAssertEqual(
-            policy.verdict(for: "send the message"),
+            policy.verdict(for: "send the message", inBrowser: true),
             .confirm(reason: "This will send — confirm?")
         )
     }
 
     func testBenignTranscriptIsUnchanged() {
         XCTAssertNil(policy.verdict(for: "open the settings window"))
+    }
+
+    func testOldPolicyWithoutBrowserConfirmWordsDecodes() throws {
+        let data = Data(#"{"blocked":[],"confirm":["delete"]}"#.utf8)
+        let decoded = try SafetyPolicy.load(from: data)
+        XCTAssertEqual(decoded.confirmInBrowser, [])
     }
 }

@@ -140,6 +140,11 @@ enum AXTreeError: Error, LocalizedError {
 }
 
 enum AXTreeReader {
+    private struct WalkResult<N: AXNode> {
+        let nodes: [(node: N, role: String, label: String, value: String?)]
+        let partial: Bool
+    }
+
     static let interactiveRoles: Set<String> = [
         "AXButton", "AXLink", "AXMenuItem", "AXTab", "AXCheckBox",
         "AXRadioButton", "AXPopUpButton", "AXComboBox", "AXRow", "AXCell",
@@ -198,6 +203,15 @@ enum AXTreeReader {
         maxElements: Int = 600,
         deadline: Date
     ) -> [(node: N, role: String, label: String, value: String?)]? {
+        walkResult(root, maxElements: maxElements, deadline: deadline)?.nodes
+    }
+
+    private static func walkResult<N: AXNode>(
+        _ root: N,
+        maxElements: Int = 600,
+        deadline: Date,
+        requireInteractive: Bool = true
+    ) -> WalkResult<N>? {
         var queue = [root]
         var index = 0
         var result: [(node: N, role: String, label: String, value: String?)] = []
@@ -206,7 +220,10 @@ enum AXTreeReader {
 
         while index < queue.count {
             guard Date() < deadline else {
-                return interactiveCount >= 3 ? result : nil
+                guard !requireInteractive || interactiveCount >= 3 else {
+                    return nil
+                }
+                return WalkResult(nodes: result, partial: true)
             }
             let node = queue[index]
             index += 1
@@ -248,16 +265,19 @@ enum AXTreeReader {
             }
             queue.append(contentsOf: node.children)
             if result.count >= maxElements {
-                guard interactiveCount >= 3 else { return nil }
-                return result
+                guard !requireInteractive || interactiveCount >= 3 else { return nil }
+                return WalkResult(nodes: result, partial: false)
             }
         }
-        return interactiveCount >= 3 ? result : nil
+        return !requireInteractive || interactiveCount >= 3
+            ? WalkResult(nodes: result, partial: false)
+            : nil
     }
 
     static func snapshot(
         pid: Int,
-        windowFrame: CGRect?
+        windowFrame: CGRect?,
+        full: Bool = false
     ) -> (snapshot: CuaSnapshot, entries: [String: AXEntry])? {
         let app = AXUIElementCreateApplication(pid_t(pid))
         _ = AXUIElementSetAttributeValue(
@@ -271,12 +291,17 @@ enum AXTreeReader {
             kCFBooleanTrue
         )
         guard let root = window(pid: pid_t(pid), frame: windowFrame),
-              let nodes = walk(
+              let initial = walkResult(
                   AXElementNode(element: root),
-                  deadline: Date().addingTimeInterval(0.3)
+                  deadline: Date().addingTimeInterval(full ? 4.0 : 1.5),
+                  requireInteractive: !full
               ) else {
             return nil
         }
+        if full {
+            return snapshot(nodes: initial.nodes, partial: initial.partial)
+        }
+        let nodes = initial.nodes
         if shouldRewalk(
             interactiveCount: nodes.filter({ interactiveRoles.contains($0.role) }).count,
             frame: windowFrame
@@ -298,29 +323,33 @@ enum AXTreeReader {
                 postZeroDeltaScroll(at: windowFrame?.center ?? .zero)
             }
             Thread.sleep(forTimeInterval: 0.25)
-            let rewalked = walk(
+            let rewalked = walkResult(
                 AXElementNode(element: root),
-                deadline: Date().addingTimeInterval(0.6)
-            ) ?? nodes
+                deadline: Date().addingTimeInterval(1.2)
+            ) ?? WalkResult(nodes: nodes, partial: false)
             let beforeCount = nodes.filter {
                 interactiveRoles.contains($0.role)
             }.count
-            let afterCount = rewalked.filter {
+            let rewalkedNodes = rewalked.nodes
+            let afterCount = rewalkedNodes.filter {
                 interactiveRoles.contains($0.role)
             }.count
             Log.agent.info(
                 "axtree rewalk before=\(beforeCount, privacy: .public) after=\(afterCount, privacy: .public) poke=\(poke, privacy: .public)"
             )
-            return snapshot(nodes: rewalked)
+            return snapshot(
+                nodes: rewalkedNodes,
+                partial: initial.partial || rewalked.partial
+            )
         }
-        return snapshot(nodes: nodes)
+        return snapshot(nodes: nodes, partial: initial.partial)
     }
 
     static func wake(pid: Int, windowFrame: CGRect?) -> (before: Int, after: Int, method: String)? {
         guard let root = window(pid: pid_t(pid), frame: windowFrame) else { return nil }
         let beforeNodes = walk(
             AXElementNode(element: root),
-            deadline: Date().addingTimeInterval(0.3)
+            deadline: Date().addingTimeInterval(1.5)
         ) ?? []
         let before = beforeNodes.filter { interactiveRoles.contains($0.role) }.count
         let background = beforeNodes
@@ -345,7 +374,7 @@ enum AXTreeReader {
         Thread.sleep(forTimeInterval: 0.3)
         let afterNodes = walk(
             AXElementNode(element: root),
-            deadline: Date().addingTimeInterval(1.0)
+            deadline: Date().addingTimeInterval(4.0)
         ) ?? beforeNodes
         let after = afterNodes.filter { interactiveRoles.contains($0.role) }.count
         Log.agent.info(
@@ -382,7 +411,8 @@ enum AXTreeReader {
     }
 
     private static func snapshot<N: AXNode>(
-        nodes: [(node: N, role: String, label: String, value: String?)]
+        nodes: [(node: N, role: String, label: String, value: String?)],
+        partial: Bool = false
     ) -> (snapshot: CuaSnapshot, entries: [String: AXEntry]) {
         var entries: [String: AXEntry] = [:]
         var elements: [CuaElement] = []
@@ -412,7 +442,8 @@ enum AXTreeReader {
                 snapshotId: UUID().uuidString,
                 treeMarkdown: lines.joined(separator: "\n"),
                 elements: elements,
-                image: nil
+                image: nil,
+                partial: partial
             ),
             entries
         )

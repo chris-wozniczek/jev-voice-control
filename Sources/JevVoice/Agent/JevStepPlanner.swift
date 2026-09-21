@@ -53,7 +53,7 @@ final class JevStepPlanner: ActionPlanner {
         let overlap: Int
 
         var elementRoleIsText: Bool {
-            ["AXTextField", "AXTextArea", "AXSearchField"].contains(element.role)
+            ["AXTextField", "AXTextArea", "AXSearchField", "AXComboBox"].contains(element.role)
         }
     }
 
@@ -78,6 +78,7 @@ final class JevStepPlanner: ActionPlanner {
     private var previousSnapshot: CuaSnapshot?
     private var forcedOCRRequested = false
     private var wakeRequested = false
+    private var fullObserveRequested = false
     private var creationFired: (label: String, fingerprintBefore: String)?
 
     private let interactiveRoles: Set<String> = [
@@ -117,6 +118,7 @@ final class JevStepPlanner: ActionPlanner {
         }
         previousSnapshot = snapshot
         let textToType = ctx.generatedText ?? SlotExtractor.typedText(from: ctx.goal)
+        let dictationGoal = textToType != nil && ctx.typedTextVisible != true
         let goalIsCreation = !GoalWords.words(ctx.goal)
             .isDisjoint(with: Self.creationGoalWords)
         if let lastRecord = ctx.history.last,
@@ -173,9 +175,67 @@ final class JevStepPlanner: ActionPlanner {
             snapshot.elements,
             goal: ctx.goal,
             goalIsCreation: goalIsCreation,
-            excludedLabels: ctx.excludedLabels.union(excludedLabels)
+            excludedLabels: ctx.excludedLabels.union(excludedLabels),
+            dictationOnly: dictationGoal,
+            contentWords: textToType.map(GoalWords.words) ?? []
         )
+        if textToType != nil,
+           ctx.history.last?.tool == "type_text",
+           ctx.history.last?.succeeded == true,
+           ctx.typedTextVisible == true {
+            return makeTurn(call: DeepSeekToolCall(
+                id: "jev-\(ctx.stepIndex + 1)",
+                name: "done",
+                arguments: ["summary": .string(summary(for: ctx.goal))]
+            ))
+        }
         guard !candidates.isEmpty else {
+            if dictationGoal {
+                if !fullObserveRequested {
+                    fullObserveRequested = true
+                    return makeTurn(call: DeepSeekToolCall(
+                        id: "jev-\(ctx.stepIndex + 1)",
+                        name: "observe",
+                        arguments: [
+                            "app": ctx.targetApp.map(JSONValue.string) ?? .null,
+                            "screenshot": .bool(false),
+                            "full": .bool(true),
+                        ]
+                    ))
+                }
+                let hasOCR = snapshot.elements.contains { $0.token.hasPrefix("ocr:") }
+                if snapshot.source == .ax, !wakeRequested {
+                    wakeRequested = true
+                    return makeTurn(call: DeepSeekToolCall(
+                        id: "jev-\(ctx.stepIndex + 1)",
+                        name: "observe",
+                        arguments: [
+                            "app": ctx.targetApp.map(JSONValue.string) ?? .null,
+                            "screenshot": .bool(false),
+                            "wake": .bool(true),
+                        ]
+                    ))
+                }
+                if !hasOCR, !forcedOCRRequested {
+                    forcedOCRRequested = true
+                    return makeTurn(
+                        call: DeepSeekToolCall(
+                            id: "jev-\(ctx.stepIndex + 1)",
+                            name: "observe",
+                            arguments: [
+                                "app": ctx.targetApp.map(JSONValue.string) ?? .null,
+                                "screenshot": .bool(false),
+                                "force_ocr": .bool(true),
+                            ]
+                        ),
+                        forceOCR: true
+                    )
+                }
+                return makeFailure(
+                    "I can't see a text box in \(ctx.targetApp ?? "the current app")",
+                    step: ctx.stepIndex + 1
+                )
+            }
             if canEscalate {
                 return escalation("no accessible controls")
             }
@@ -547,7 +607,9 @@ final class JevStepPlanner: ActionPlanner {
                 ]
             ))
         }
-        if actionKey == previousActionKey, fingerprint == previousFingerprint {
+        if selectedChoice != "stuck",
+           actionKey == previousActionKey,
+           fingerprint == previousFingerprint {
             return stuckTurn(
                 reason: "The same control did not change the screen",
                 step: ctx.stepIndex + 1
@@ -563,6 +625,18 @@ final class JevStepPlanner: ActionPlanner {
             )
         }
         if selectedChoice == "stuck" {
+            if !fullObserveRequested {
+                fullObserveRequested = true
+                return makeTurn(call: DeepSeekToolCall(
+                    id: "jev-\(ctx.stepIndex + 1)",
+                    name: "observe",
+                    arguments: [
+                        "app": ctx.targetApp.map(JSONValue.string) ?? .null,
+                        "screenshot": .bool(false),
+                        "full": .bool(true),
+                    ]
+                ))
+            }
             let hasOCR = snapshot.elements.contains { $0.token.hasPrefix("ocr:") }
             if snapshot.source == .ax, !wakeRequested {
                 wakeRequested = true
@@ -577,7 +651,7 @@ final class JevStepPlanner: ActionPlanner {
                 )
                 return makeTurn(call: observeCall)
             }
-            if canEscalate, !hasOCR, !forcedOCRRequested {
+            if !hasOCR, !forcedOCRRequested {
                 forcedOCRRequested = true
                 let observeCall = DeepSeekToolCall(
                     id: "jev-\(ctx.stepIndex + 1)",
@@ -597,7 +671,7 @@ final class JevStepPlanner: ActionPlanner {
             )
         }
         if let candidate = selectedCandidate {
-            if candidate.elementRoleIsText {
+            if candidate.elementRoleIsText || (textToType != nil && candidate.element.token.hasPrefix("ocr:")) {
                 if let textToType {
                     return makeTurn(call: DeepSeekToolCall(
                         id: "jev-\(ctx.stepIndex + 1)",
@@ -654,9 +728,11 @@ final class JevStepPlanner: ActionPlanner {
         _ elements: [CuaElement],
         goal: String,
         goalIsCreation: Bool,
-        excludedLabels: Set<String>
+        excludedLabels: Set<String>,
+        dictationOnly: Bool = false,
+        contentWords: Set<String> = []
     ) -> [Candidate] {
-        let textRoles = Set(["AXTextField", "AXTextArea", "AXSearchField"])
+        let textRoles = Set(["AXTextField", "AXTextArea", "AXSearchField", "AXComboBox"])
         let interactiveCount = elements.filter {
             interactiveRoles.contains($0.role)
                 && (!$0.label.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -682,7 +758,11 @@ final class JevStepPlanner: ActionPlanner {
                     .lowercased()
                 guard hasLabel, !axInteractiveLabels.contains(normalized) else { continue }
             } else {
-                guard isInteractive || (includeExtras && hasLabel) else { continue }
+                if dictationOnly {
+                    guard textRoles.contains(element.role) else { continue }
+                } else {
+                    guard isInteractive || (includeExtras && hasLabel) else { continue }
+                }
             }
             let key = "\(element.role)|\(element.label)|\(element.value ?? "")"
             guard seen.insert(key).inserted else { continue }
@@ -693,7 +773,7 @@ final class JevStepPlanner: ActionPlanner {
             }
         }
         let selected = Array(axElements.prefix(200)) + Array(ocrElements.prefix(60))
-        let goalWords = GoalWords.words(goal)
+        let goalWords = GoalWords.words(goal).subtracting(contentWords)
         var ranked: [RankedCandidate] = []
         for (index, element) in selected.enumerated() {
             let labelAndValue = "\(element.label) \(element.value ?? "")"

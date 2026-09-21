@@ -105,19 +105,22 @@ struct CuaSnapshot {
     let elements: [CuaElement]
     let image: Data?
     let source: CuaSnapshotSource
+    let partial: Bool
 
     init(
         snapshotId: String,
         treeMarkdown: String,
         elements: [CuaElement],
         image: Data?,
-        source: CuaSnapshotSource = .unknown
+        source: CuaSnapshotSource = .unknown,
+        partial: Bool = false
     ) {
         self.snapshotId = snapshotId
         self.treeMarkdown = treeMarkdown
         self.elements = elements
         self.image = image
         self.source = source
+        self.partial = partial
     }
 
     func element(token: String) -> CuaElement? {
