@@ -37,6 +37,7 @@ final class VoiceController: ObservableObject {
     private var cancellables: Set<AnyCancellable> = []
     private var startTask: Task<Void, Never>?
     private var confirmationTimeoutTask: Task<Void, Never>?
+    private var preConfirmedExecution = false
     private var taskStartedAt: Date?
     private var frontmostObserver: NSObjectProtocol?
     private(set) var lastExternalFrontmostApp: String?
@@ -294,6 +295,7 @@ final class VoiceController: ObservableObject {
         case .run:
             await executeAll()
         case .confirm(let reason):
+            preConfirmedExecution = true
             await requestVoiceConfirmation(reason: reason)
         case .reject(let reason):
             if !routesToAgent, await offerSuggestions(for: text, decisions: decisions) {
@@ -482,7 +484,9 @@ final class VoiceController: ObservableObject {
         confirmationTimeoutTask?.cancel()
         awaitingVoiceAnswer = false
         recognizer.stop()
-        await executeAll()
+        let preConfirmed = preConfirmedExecution
+        preConfirmedExecution = false
+        await executeAll(preConfirmed: preConfirmed)
     }
 
     func dismiss() {
@@ -493,6 +497,7 @@ final class VoiceController: ObservableObject {
         confirmationTimeoutTask?.cancel()
         confirmationTimeoutTask = nil
         awaitingVoiceAnswer = false
+        preConfirmedExecution = false
         recognizer.stop()
         guard status == .awaitingConfirm || status == .listening else { return }
         decisions = []
@@ -502,7 +507,7 @@ final class VoiceController: ObservableObject {
         completeTask()
     }
 
-    private func executeAll() async {
+    private func executeAll(preConfirmed: Bool = false) async {
         let actionable = decisions.filter { $0.action != .none }
         guard !actionable.isEmpty else {
             let reason = agentUnavailableReason()
@@ -537,7 +542,8 @@ final class VoiceController: ObservableObject {
                         context: AgentContext(
                             frontmostApp: target,
                             siteHost: decision.siteHost,
-                            generatedText: decision.generatedText
+                            generatedText: decision.generatedText,
+                            preConfirmed: preConfirmed
                         )
                     )
                     switch outcome {

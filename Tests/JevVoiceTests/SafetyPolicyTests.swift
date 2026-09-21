@@ -19,7 +19,7 @@ final class SafetyPolicyTests: XCTestCase {
     func testConfirmWordConfirms() {
         XCTAssertEqual(
             policy.verdict(for: "send the message"),
-            .confirm(reason: "send— confirm?")
+            .confirm(reason: "This will send — confirm?")
         )
     }
 

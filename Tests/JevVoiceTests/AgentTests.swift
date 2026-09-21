@@ -359,6 +359,32 @@ final class AgentTests: XCTestCase {
     }
 
     @MainActor
+    func testPreConfirmedAgentActionDoesNotRequestConfirmation() async throws {
+        var confirmationCount = 0
+        AgentRunner.shared.confirmationHandler = { _ in
+            confirmationCount += 1
+        }
+        defer {
+            AgentRunner.shared.confirmationHandler = nil
+        }
+        let call = DeepSeekToolCall(
+            id: "test",
+            name: "click",
+            arguments: ["element_token": .string("cdp:1")]
+        )
+        do {
+            _ = try await AgentRunner.shared.executeForTesting(
+                call,
+                context: AgentContext(preConfirmed: true)
+            )
+            XCTFail("Expected missing CDP observation error")
+        } catch {
+            XCTAssertTrue(error.localizedDescription.contains("Observe a Chrome page first"))
+        }
+        XCTAssertEqual(confirmationCount, 0)
+    }
+
+    @MainActor
     func testAppsAreCachedUntilForcedRefresh() async throws {
         var calls = 0
         AgentRunner.shared.setAppsProviderForTesting {

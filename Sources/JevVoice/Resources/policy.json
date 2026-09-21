@@ -26,7 +26,6 @@
     "reply",
     "delete",
     "remove",
-    "quit",
-    "close all"
+    "empty trash"
   ]
 }

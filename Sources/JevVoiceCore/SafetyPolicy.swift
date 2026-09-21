@@ -55,7 +55,7 @@ public struct SafetyPolicy: Decodable {
                   ) != nil else {
                 continue
             }
-            return .confirm(reason: "\(word)— confirm?")
+            return .confirm(reason: "This will \(word) — confirm?")
         }
         return nil
     }

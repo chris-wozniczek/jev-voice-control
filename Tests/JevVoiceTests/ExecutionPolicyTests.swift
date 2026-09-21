@@ -137,7 +137,7 @@ final class ExecutionPolicyTests: XCTestCase {
                 policy: policy,
                 transcript: "send the message"
             ),
-            .confirm(reason: "send— confirm?")
+            .confirm(reason: "This will send — confirm?")
         )
     }
 }
