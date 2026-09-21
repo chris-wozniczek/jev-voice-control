@@ -651,6 +651,54 @@ final class JevStepPlannerTests: XCTestCase {
         XCTAssertEqual(deepSeek.calls, 2)
     }
 
+    @MainActor
+    func testCascadeStopsAfterConfiguredFallbackSteps() async throws {
+        let oldSteps = Config.shared.fallbackMaxSteps
+        let oldSeconds = Config.shared.fallbackMaxSeconds
+        defer {
+            Config.shared.fallbackMaxSteps = oldSteps
+            Config.shared.fallbackMaxSeconds = oldSeconds
+        }
+        Config.shared.fallbackMaxSteps = 6
+        Config.shared.fallbackMaxSeconds = 30
+        let jev = StubPlanner(turn: PlannerTurn(
+            assistant: DeepSeekMessage(role: "assistant", content: nil, name: nil, toolCallID: nil, toolCalls: nil),
+            toolCalls: [],
+            escalation: .toDeepSeek(reason: "stuck")
+        ))
+        let deepSeek = StubPlanner(turn: PlannerTurn(
+            assistant: DeepSeekMessage(role: "assistant", content: nil, name: nil, toolCallID: nil, toolCalls: nil),
+            toolCalls: [DeepSeekToolCall(id: "deep", name: "observe", arguments: [:])]
+        ))
+        let cascade = CascadePlanner(jev: jev, deepSeek: deepSeek)
+        for _ in 0..<6 {
+            _ = try await cascade.next(PlannerContext())
+        }
+        do {
+            _ = try await cascade.next(PlannerContext())
+            XCTFail("Expected budget error")
+        } catch let error as AgentError {
+            guard case .budget = error else {
+                XCTFail("Expected budget error, got \(error)")
+                return
+            }
+        } catch {
+            XCTFail("Expected AgentError, got \(error)")
+        }
+    }
+
+    func testScreenshotScaleMath() {
+        XCTAssertEqual(ScreenshotScale.factor(width: 2560, height: 1440), 0.5, accuracy: 0.0001)
+        XCTAssertEqual(
+            ScreenshotScale.scaledSize(width: 2560, height: 1440),
+            CGSize(width: 1280, height: 720)
+        )
+        XCTAssertEqual(
+            ScreenshotScale.originalPoint(x: 100, y: 50, scale: 0.5),
+            CGPoint(x: 200, y: 100)
+        )
+    }
+
     private func snapshot(_ elements: [CuaElement]) -> CuaSnapshot {
         CuaSnapshot(snapshotId: "snapshot", treeMarkdown: "", elements: elements, image: nil)
     }

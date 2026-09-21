@@ -95,7 +95,7 @@ final class VoiceController: ObservableObject {
         }
         recognizer.$transcript
             .filter { !$0.isEmpty }
-            .sink { [weak self] in self?.transcript = $0 }
+            .sink { [weak self] in self?.transcript = TranscriptNormalizer.normalize($0) }
             .store(in: &cancellables)
         recognizer.$statusMessage
             .sink { [weak self] in self?.speechStatusMessage = $0 }
@@ -235,6 +235,10 @@ final class VoiceController: ObservableObject {
             latencyMs = result.map(\.latencyMs).max() ?? 0
             model = result.first?.model ?? ""
             for i in result.indices { result[i].latencyMs = latencyMs }
+            result = Self.rerouteActionlessSystems(
+                result,
+                targetApp: lastExternalFrontmostApp
+            )
             decisions = result
             history = (result + history).prefix(10).map { $0 }
         } catch {
@@ -290,6 +294,25 @@ final class VoiceController: ObservableObject {
             status = .error(reason)
             await speakIfEnabled(reason)
             completeTask()
+        }
+    }
+
+    static func rerouteActionlessSystems(
+        _ decisions: [Decision],
+        targetApp: String?
+    ) -> [Decision] {
+        decisions.map { decision in
+            guard decision.action == .system,
+                  decision.systemAction == nil || decision.systemAction == SystemAction.none else {
+                return decision
+            }
+            var rerouted = decision
+            rerouted.action = .uiTask
+            rerouted.targetApp = targetApp
+            Log.command.info(
+                "reroute from=system to=uiTask target=\((targetApp ?? ""), privacy: .public)"
+            )
+            return rerouted
         }
     }
 

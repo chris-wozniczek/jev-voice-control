@@ -52,8 +52,12 @@ opened Settings, Preferences, or About surface is detected and closed so the
 request can continue on the original window.
 
 Computer use settings let you choose the Jev step planner or DeepSeek Flash,
-and control DeepSeek thinking (off, low, or high). In Jev mode, the DeepSeek
-key is optional and is only used for fallback.
+and control DeepSeek thinking (off, low, or high). Sparse Accessibility trees
+are re-walked after a focus or scroll poke, and Jev requests one OCR pass when
+it is stuck. Submit goals try Command-Return and Return with post-key
+verification before entering the planner loop. In Jev mode, the DeepSeek key
+is optional and is only used for fallback; the Computer use settings expose
+the maximum fallback steps and seconds.
 
 ### Learned shortcuts
 
@@ -205,6 +209,10 @@ settings to use the Cua observer exclusively.
 When an app exposes almost no accessible controls, the optional OCR fallback
 uses Apple Vision locally to read visible labels and click their screen
 coordinates. It requires Screen Recording permission and can be disabled in
+Settings › Computer use.
+
+DeepSeek screenshots are resized to reduce request cost. The fallback budget
+is configurable as **Fallback max steps** and **Fallback max seconds** in
 Settings › Computer use.
 
 End words are `do it`, `execute`, `send it`, `over`, and `that's it`; `go` is

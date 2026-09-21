@@ -67,6 +67,14 @@ enum TextEntry {
         return KeyboardFocus.readBack(value: value, expected: text)
     }
 
+    static func focusedTextInputValue(pid: pid_t) -> String? {
+        guard let element = focusedTextInput(pid: pid),
+              let value = attribute(element, kAXValueAttribute as CFString) as? String else {
+            return nil
+        }
+        return value
+    }
+
     static func verifyTyped(pid: pid_t, text: String) -> Bool {
         readBack(pid: pid, text: text) == .confirmed
     }

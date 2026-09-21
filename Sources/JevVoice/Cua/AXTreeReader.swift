@@ -281,6 +281,22 @@ enum AXTreeReader {
             interactiveCount: nodes.filter({ interactiveRoles.contains($0.role) }).count,
             frame: windowFrame
         ) {
+            let textInputRoles = Set(["AXTextArea", "AXTextField", "AXComboBox"])
+            let poke: String
+            if let textInput = nodes.first(where: { textInputRoles.contains($0.role) }) {
+                let result = AXUIElementSetAttributeValue(
+                    textInput.node.element,
+                    kAXFocusedAttribute as CFString,
+                    kCFBooleanTrue
+                )
+                poke = result == .success ? "focus" : "scroll"
+                if result != .success {
+                    postZeroDeltaScroll(at: windowFrame?.center ?? .zero)
+                }
+            } else {
+                poke = "scroll"
+                postZeroDeltaScroll(at: windowFrame?.center ?? .zero)
+            }
             Thread.sleep(forTimeInterval: 0.25)
             let rewalked = walk(
                 AXElementNode(element: root),
@@ -293,7 +309,7 @@ enum AXTreeReader {
                 interactiveRoles.contains($0.role)
             }.count
             Log.agent.info(
-                "axtree rewalk before=\(beforeCount, privacy: .public) after=\(afterCount, privacy: .public)"
+                "axtree rewalk before=\(beforeCount, privacy: .public) after=\(afterCount, privacy: .public) poke=\(poke, privacy: .public)"
             )
             return snapshot(nodes: rewalked)
         }
@@ -302,7 +318,21 @@ enum AXTreeReader {
 
     static func shouldRewalk(interactiveCount: Int, frame: CGRect?) -> Bool {
         guard let frame else { return false }
-        return interactiveCount < 10 && frame.width > 400 && frame.height > 300
+        let threshold = max(10, Int(frame.width * frame.height / 150_000))
+        return interactiveCount < threshold && frame.width > 400 && frame.height > 300
+    }
+
+    private static func postZeroDeltaScroll(at point: CGPoint) {
+        guard let event = CGEvent(
+            scrollWheelEvent2Source: nil,
+            units: .pixel,
+            wheelCount: 3,
+            wheel1: 0,
+            wheel2: 0,
+            wheel3: 0
+        ) else { return }
+        event.location = point
+        event.post(tap: .cghidEventTap)
     }
 
     static func snapshot<N: AXNode>(
@@ -391,6 +421,10 @@ enum AXTreeReader {
             height = Int((frame?.size.height ?? 0).rounded())
         }
     }
+}
+
+private extension CGRect {
+    var center: CGPoint { CGPoint(x: midX, y: midY) }
 }
 
 enum CGEventClicker {
