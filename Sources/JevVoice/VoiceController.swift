@@ -285,6 +285,40 @@ final class VoiceController: ObservableObject {
             return
         }
         if routesToAgent {
+            if case .run = verdict, config.learnedToolsEnabled {
+                let learnedRoute = await LearnedToolRouter(
+                    config: config,
+                    store: LearnedToolStore.shared,
+                    client: config.apiKey.isEmpty ? nil : JevClient(apiKey: config.apiKey),
+                    generator: makeGenerator()
+                ).route(
+                    transcript: text,
+                    frontmostApp: lastExternalFrontmostApp,
+                    installedApps: AppRegistry.shared.names
+                )
+                switch learnedRoute {
+                case .notHandled:
+                    break
+                case .completed(let result):
+                    status = .done
+                    transcript = result
+                    await speakIfEnabled(result)
+                    completeTask()
+                    return
+                case .failed(let reason):
+                    status = .error(reason)
+                    await speakIfEnabled(reason)
+                    completeTask()
+                    return
+                case .needsConfirmation(let reason, let operation):
+                    pendingConfirmedRun = { [weak self] in
+                        await self?.runLearnedTool(operation)
+                    }
+                    preConfirmedExecution = true
+                    await requestVoiceConfirmation(reason: reason)
+                    return
+                }
+            }
             if case .confirm(let reason) = verdict {
                 pendingConfirmedRun = { [weak self] in
                     await self?.agentFallback(transcript: text, preConfirmed: true)
@@ -627,6 +661,21 @@ final class VoiceController: ObservableObject {
         status = .done
         if config.speakReplies {
             await speaker.say(results.joined(separator: ". "))
+        }
+        completeTask()
+    }
+
+    private func runLearnedTool(
+        _ operation: @escaping () async -> LearnedToolResult<String>
+    ) async {
+        switch await operation() {
+        case .success(let result):
+            status = .done
+            transcript = result
+            await speakIfEnabled(result)
+        case .failure(let reason):
+            status = .error(reason)
+            await speakIfEnabled(reason)
         }
         completeTask()
     }

@@ -61,11 +61,17 @@ verification before entering the planner loop. In Jev mode, the DeepSeek key
 is optional and is only used for fallback; the Computer use settings expose
 the maximum fallback steps and seconds.
 
-### Learned shortcuts
+### Learned tools
 
-After a successful UI task, Jev remembers the app control that worked for that
-goal. Similar requests can use those learned labels as additional context
-without bypassing the live-screen decision.
+Scriptable unknown commands can become learned tools. When **Learn scriptable
+tools** is enabled, Jev can generate an AppleScript or JXA tool for system
+tasks such as dark mode, volume, reminders, Calendar events, and timers. Each
+tool must compile, pass the policy scanner, and pass a Jev review before it is
+confirmed and run. Successful tools are cached at
+`~/Library/Application Support/Jev Voice/tools/`; Settings › Learned tools
+lists seed and learned tools, with per-tool enable/delete controls and a
+master toggle. UI work, browsing, and operating Devin or terminal apps always
+stay on the Accessibility/Cua agent path.
 
 ### Chrome DevTools fallback
 
@@ -103,8 +109,8 @@ and Reply controls require confirmation before submission.
 
 The bundled `Resources/policy.json` blocks shell, payment, credential, and
 irreversible file-operation phrases, and asks for confirmation before send,
-submit, post, publish, tweet, reply, delete, remove, quit, or close-all
-commands. A user override at
+submit, post, publish, tweet, reply, delete, remove, or empty-trash commands.
+A user override at
 `~/Library/Application Support/Jev Voice/policy.json` replaces the bundled
 policy. Settings › Safety shows the loaded policy and can open or reveal it.
 
