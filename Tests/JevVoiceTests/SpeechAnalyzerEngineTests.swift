@@ -17,6 +17,21 @@ final class SpeechAnalyzerEngineTests: XCTestCase {
     func testStreamingEngineIsCompiledIntoCurrentToolchain() {
         XCTAssertTrue(SpeechEngineKind.streamingCompiledIn)
     }
+
+    func testSpeechAnalyzerStartsInputSequenceOnlyOnce() throws {
+        let sourceURL = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent("Sources/JevVoice/SpeechAnalyzerEngine.swift")
+        let source = try String(contentsOf: sourceURL, encoding: .utf8)
+        let normalized = source
+            .replacingOccurrences(of: " ", with: "")
+            .replacingOccurrences(of: "\t", with: "")
+            .replacingOccurrences(of: "\n", with: "")
+        XCTAssertFalse(normalized.contains("SpeechAnalyzer(inputSequence:"))
+        XCTAssertEqual(normalized.components(separatedBy: "start(inputSequence:").count - 1, 1)
+    }
 #endif
 
     func testAssembleFinalIncludesLastVolatileText() throws {
