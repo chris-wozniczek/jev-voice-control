@@ -12,6 +12,21 @@ public enum LocalCommandParser {
         let trimmed = clause.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
 
+        if let deferred = SlotExtractor.deferredDictation(
+            from: trimmed,
+            installedApps: installedApps,
+            aliases: aliases
+        ) {
+            return Decision(
+                clause: trimmed,
+                action: .dictate,
+                targetApp: deferred.targetApp,
+                text: deferred.text,
+                confidence: 0.9,
+                model: "local"
+            )
+        }
+
         if let brief = SlotExtractor.composeRequest(from: trimmed) {
             let site = siteResolver.site(in: trimmed, installedApps: installedApps)
             return Decision(

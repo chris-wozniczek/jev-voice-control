@@ -26,6 +26,19 @@ extension JevClient: JevAnswering {
 
 @MainActor
 final class JevStepPlanner: ActionPlanner {
+    nonisolated static func isCreationControl(label: String) -> Bool {
+        label.trimmingCharacters(in: .whitespacesAndNewlines)
+            .range(
+                of: #"^(new|create|add|send|submit|post|reply|publish|compose|start)\b"#,
+                options: [.regularExpression, .caseInsensitive]
+            ) != nil
+    }
+
+    static let creationGoalWords: Set<String> = [
+        "new", "create", "start", "another", "open", "make",
+        "compose", "send", "submit", "post", "reply",
+    ]
+
     nonisolated static func isRerankable(role: String, label: String) -> Bool {
         [
             "AXButton", "AXPopUpButton", "AXMenuItem", "AXTab", "AXCheckBox",
@@ -64,6 +77,7 @@ final class JevStepPlanner: ActionPlanner {
     private var previousElementCount: Int?
     private var previousSnapshot: CuaSnapshot?
     private var forcedOCRRequested = false
+    private var creationFired: (label: String, fingerprintBefore: String)?
 
     private let interactiveRoles: Set<String> = [
         "AXButton", "AXLink", "AXTextField", "AXTextArea", "AXMenuItem",
@@ -101,10 +115,59 @@ final class JevStepPlanner: ActionPlanner {
             Log.agent.info("stage=verify \(snapshotDiff.compactDescription, privacy: .public)")
         }
         previousSnapshot = snapshot
+        let textToType = ctx.generatedText ?? SlotExtractor.typedText(from: ctx.goal)
+        let goalIsCreation = !GoalWords.words(ctx.goal)
+            .isDisjoint(with: Self.creationGoalWords)
+        if let lastRecord = ctx.history.last,
+           lastRecord.succeeded,
+           ["click", "click_at"].contains(lastRecord.tool),
+           let label = lastRecord.elementLabel,
+           Self.isCreationControl(label: label),
+           snapshotDiff?.isEmpty != false {
+            excludedLabels.insert(label)
+        }
+        if let lastRecord = ctx.history.last,
+           lastRecord.succeeded,
+           let snapshotDiff,
+           (
+               !snapshotDiff.isEmpty
+                   || ctx.windowTitle != ctx.previousWindowTitle
+                   || previousElementCount.map { $0 != snapshot.elements.count } == true
+           ) {
+            let creationLabel: String?
+            if ["click", "click_at"].contains(lastRecord.tool),
+               let label = lastRecord.elementLabel,
+               Self.isCreationControl(label: label) {
+                creationLabel = label
+            } else if lastRecord.tool == "press_key",
+                      lastRecord.argsSummary.localizedCaseInsensitiveContains("command") {
+                creationLabel = lastRecord.elementLabel ?? "press_key"
+            } else {
+                creationLabel = nil
+            }
+            if let creationLabel {
+                let fingerprint = snapshot.elements.map {
+                    "\($0.role)|\($0.label)|\($0.value ?? "")"
+                }.joined(separator: "\n")
+                creationFired = (creationLabel, fingerprint)
+                excludedLabels.insert(creationLabel)
+                if goalIsCreation && textToType == nil {
+                    Log.agent.info(
+                        "stage=verify creation satisfied label=\(creationLabel, privacy: .public)"
+                    )
+                    return makeTurn(call: DeepSeekToolCall(
+                        id: "jev-\(ctx.stepIndex + 1)",
+                        name: "done",
+                        arguments: ["summary": .string(summary(for: ctx.goal))]
+                    ))
+                }
+            }
+        }
 
         let candidates = makeCandidates(
             snapshot.elements,
             goal: ctx.goal,
+            goalIsCreation: goalIsCreation,
             excludedLabels: ctx.excludedLabels.union(excludedLabels)
         )
         guard !candidates.isEmpty else {
@@ -117,7 +180,6 @@ final class JevStepPlanner: ActionPlanner {
             )
         }
 
-        let textToType = ctx.generatedText ?? SlotExtractor.typedText(from: ctx.goal)
         let hasMutation = ctx.history.contains {
             ["click", "click_at", "type_text", "press_key", "open_app"].contains($0.tool)
         }
@@ -172,7 +234,9 @@ final class JevStepPlanner: ActionPlanner {
                 candidate.id,
                 Optional(
                     [
-                        candidate.overlap > 0 ? "\(base) — label matches the request" : base,
+                        Self.isCreationControl(label: candidate.element.label) && !goalIsCreation
+                            ? "\(base) — creates something new, which the request did not ask for"
+                            : candidate.overlap > 0 ? "\(base) — label matches the request" : base,
                         hasWorkedBefore ? "(worked before for a similar request)" : nil,
                     ]
                     .compactMap { $0 }
@@ -287,7 +351,15 @@ final class JevStepPlanner: ActionPlanner {
                 modifiers: []
             )
         }
-        if (choice == "done" && confidence >= 0.5 || goalReached >= 0.7), hasMutation {
+        let changed = snapshotDiff?.isEmpty == false
+        if (
+            (
+                choice == "done" && (
+                    confidence >= 0.5
+                        || (confidence >= 0.4 && changed)
+                ) || goalReached >= 0.7
+            ) && hasMutation
+        ) {
             if textToType != nil, ctx.typedTextVisible == false {
                 return stuckTurn(
                     reason: "The typed text is not visible in the current field",
@@ -353,8 +425,57 @@ final class JevStepPlanner: ActionPlanner {
             recentFingerprints.removeFirst()
         }
         var selectedChoice = choice == "done" && goalReached < 0.7
-            ? highestAlternative(probabilities: probabilities)
+            ? highestAlternative(probabilities: probabilities) ?? "stuck"
             : choice
+        if let selected = candidates.first(where: { $0.id == selectedChoice }),
+           Self.isCreationControl(label: selected.element.label) {
+            if let creationFired {
+                let alternative = highestAlternative(
+                    probabilities: probabilities,
+                    excluding: [selected.id]
+                )
+                if let alternative,
+                   candidates.contains(where: { $0.id == alternative }),
+                   !Self.isCreationControl(
+                       label: candidates.first(where: { $0.id == alternative })!.element.label
+                   ) {
+                    selectedChoice = alternative
+                } else if hasMutation && changed {
+                    return makeTurn(call: DeepSeekToolCall(
+                        id: "jev-\(ctx.stepIndex + 1)",
+                        name: "done",
+                        arguments: ["summary": .string(summary(for: ctx.goal))]
+                    ))
+                } else {
+                    return stuckTurn(
+                        reason: "The creation control was already used",
+                        step: ctx.stepIndex + 1
+                    )
+                }
+                _ = creationFired
+            } else if !goalIsCreation {
+                let alternative = highestAlternative(
+                    probabilities: probabilities,
+                    excluding: [selected.id]
+                )
+                if let alternative,
+                   candidates.contains(where: { $0.id == alternative }),
+                   !Self.isCreationControl(
+                       label: candidates.first(where: { $0.id == alternative })!.element.label
+                   ) {
+                    selectedChoice = alternative
+                } else if let fallback = candidates.first(where: {
+                    !Self.isCreationControl(label: $0.element.label)
+                }) {
+                    selectedChoice = fallback.id
+                } else {
+                    return stuckTurn(
+                        reason: "The request did not ask to create something new",
+                        step: ctx.stepIndex + 1
+                    )
+                }
+            }
+        }
         if let chosen = candidates.first(where: { $0.id == selectedChoice }),
            chosen.overlap == 0,
            !chosen.elementRoleIsText,
@@ -515,6 +636,7 @@ final class JevStepPlanner: ActionPlanner {
     private func makeCandidates(
         _ elements: [CuaElement],
         goal: String,
+        goalIsCreation: Bool,
         excludedLabels: Set<String>
     ) -> [Candidate] {
         let textRoles = Set(["AXTextField", "AXTextArea", "AXSearchField"])
@@ -538,7 +660,9 @@ final class JevStepPlanner: ActionPlanner {
         var ranked: [RankedCandidate] = []
         for (index, element) in selected.enumerated() {
             let labelAndValue = "\(element.label) \(element.value ?? "")"
-            let overlap = goalWords.intersection(GoalWords.words(labelAndValue)).count
+            let overlap = Self.isCreationControl(label: element.label) && !goalIsCreation
+                ? 0
+                : goalWords.intersection(GoalWords.words(labelAndValue)).count
             ranked.append(RankedCandidate(
                 originalIndex: index,
                 element: element,
@@ -619,10 +743,13 @@ final class JevStepPlanner: ActionPlanner {
         ))
     }
 
-    private func highestAlternative(probabilities: [String: Double]) -> String {
+    private func highestAlternative(
+        probabilities: [String: Double],
+        excluding: Set<String> = []
+    ) -> String? {
         probabilities
-            .filter { $0.key != "done" && $0.key != "stuck" }
-            .max { $0.value < $1.value }?.key ?? "stuck"
+            .filter { $0.key != "done" && $0.key != "stuck" && !excluding.contains($0.key) }
+            .max { $0.value < $1.value }?.key
     }
 
     private func promptRole(_ role: String) -> String {

@@ -61,6 +61,18 @@ final class SlotExtractorTests: XCTestCase {
 
     func testDictationText() {
         XCTAssertEqual(SlotExtractor.dictationText(from: "type hello world"), "hello world")
+        XCTAssertEqual(
+            SlotExtractor.dictationText(from: "type the prompt. Check RAM usage"),
+            "Check RAM usage"
+        )
+        XCTAssertEqual(
+            SlotExtractor.dictationText(from: "type in the prompt box, check around music"),
+            "check around music"
+        )
+        XCTAssertEqual(
+            SlotExtractor.dictationText(from: "type check RAM usage in the prompt box"),
+            "check RAM usage"
+        )
     }
 
     func testRequestedDictationText() {
@@ -94,6 +106,40 @@ final class SlotExtractorTests: XCTestCase {
             "about the new release"
         )
         XCTAssertNil(SlotExtractor.composeRequest(from: "compose a post saying 'hello'"))
+    }
+
+    func testDeferredDictation() {
+        XCTAssertEqual(
+            SlotExtractor.deferredDictation(
+                from: "In the Devin session, uh, check the RAM usage type that in the prompt box",
+                installedApps: ["Devin"],
+                aliases: [:]
+            )?.text,
+            "check the RAM usage"
+        )
+        XCTAssertEqual(
+            SlotExtractor.deferredDictation(
+                from: "In the Devin session, uh, check the RAM usage type that in the prompt box",
+                installedApps: ["Devin"],
+                aliases: [:]
+            )?.targetApp,
+            "Devin"
+        )
+        XCTAssertEqual(
+            SlotExtractor.deferredDictation(
+                from: "check the RAM usage type that in the prompt box",
+                installedApps: ["Devin"],
+                aliases: [:]
+            )?.text,
+            "check the RAM usage"
+        )
+        XCTAssertNil(
+            SlotExtractor.deferredDictation(
+                from: "this is not deferred dictation",
+                installedApps: ["Devin"],
+                aliases: [:]
+            )
+        )
     }
 
     func testPercentDigits() {

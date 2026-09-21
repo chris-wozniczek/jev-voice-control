@@ -4,7 +4,7 @@ public enum GoalWords {
     private static let stopWords: Set<String> = [
         "the", "a", "an", "to", "in", "on", "of", "and", "or", "for", "with",
         "my", "this", "that", "it", "please", "click", "open", "select",
-        "choose", "pick", "change", "set", "new",
+        "choose", "pick", "change", "set",
     ]
 
     public static func words(_ text: String) -> Set<String> {

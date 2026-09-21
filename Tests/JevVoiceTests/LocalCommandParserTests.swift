@@ -102,4 +102,16 @@ final class LocalCommandParserTests: XCTestCase {
             XCTAssertEqual(decision?.text, expected, clause)
         }
     }
+
+    func testDeferredDictationUsesResolvedTargetApp() {
+        let decision = LocalCommandParser.parse(
+            clause: "In the Devin session, uh, check the RAM usage type that in the prompt box",
+            installedApps: apps,
+            aliases: AppMatcher.builtInAliases,
+            frontmostApp: "Safari"
+        )
+        XCTAssertEqual(decision?.action, .dictate)
+        XCTAssertEqual(decision?.targetApp, "Devin")
+        XCTAssertEqual(decision?.text, "check the RAM usage")
+    }
 }

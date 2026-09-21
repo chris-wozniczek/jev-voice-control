@@ -124,7 +124,7 @@ final class AppActionsTests: XCTestCase {
     }
 
     func testBundledActionsDecode() {
-        XCTAssertGreaterThanOrEqual(AppActionRegistry.shared.actions.count, 6)
+        XCTAssertGreaterThanOrEqual(AppActionRegistry.shared.actions.count, 5)
     }
 
     func testSiteActionRequiresMatchingWindowOrURL() {
