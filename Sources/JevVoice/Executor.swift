@@ -427,6 +427,14 @@ enum Executor {
         process.waitUntilExit()
         let output = String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
         if process.terminationStatus != 0 {
+            if launchPath == "/usr/bin/osascript",
+               (output.contains("-1743")
+                || output.localizedCaseInsensitiveContains("Not authorized to send Apple events")) {
+                Permission.automation.openSystemSettings()
+                throw ExecutorError.controlFailed(
+                    "Allow Jev Voice to control System Events: System Settings › Privacy & Security › Automation"
+                )
+            }
             throw NSError(
                 domain: "JevVoice.Executor", code: Int(process.terminationStatus),
                 userInfo: [NSLocalizedDescriptionKey: output.isEmpty ? "\(launchPath) failed" : output]

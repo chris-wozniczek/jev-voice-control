@@ -48,6 +48,7 @@ final class AgentRunner: ObservableObject {
     private var lastCDPTitle: String?
     private var lastCDPPort: Int?
     private var targetApp: String?
+    private var siteHost: String?
     private var currentGoal = ""
     private var confirmationContinuation: CheckedContinuation<Bool, Never>?
     private var cancellationRequested = false
@@ -133,6 +134,7 @@ final class AgentRunner: ObservableObject {
         preConfirmed = context.preConfirmed
         let runStarted = Date()
         targetApp = context.frontmostApp
+        siteHost = context.siteHost
         currentGoal = goal
         Log.agent.info(
             "run start goal=\(goal, privacy: .public) targetApp=\((self.targetApp ?? "none"), privacy: .public)"
@@ -399,6 +401,23 @@ final class AgentRunner: ObservableObject {
             outcomeDescription = "cancelled"
             return .cancelled
         } catch AgentError.budget {
+            let goalWasMet = plannerContext.typedTextVisible == true
+                || (plannerContext.history.last.map { record in
+                    let mutation = [
+                        "click", "click_at", "type_text", "press_key", "open_app",
+                    ].contains(record.tool)
+                    guard mutation, record.succeeded,
+                          let expected = SlotExtractor.typedText(from: goal),
+                          let pid = lastPID else {
+                        return false
+                    }
+                    return TextEntry.verifyTyped(pid: pid_t(pid), text: expected)
+                } ?? false)
+            if goalWasMet {
+                Log.agent.info("outcome=done reason=budget-but-goal-met")
+                outcomeDescription = "done"
+                return .done("Done.")
+            }
             if let stats = effectivePlanner.fallbackStats {
                 let elapsed = stats.elapsed ?? 0
                 Log.agent.info(
@@ -617,6 +636,13 @@ final class AgentRunner: ObservableObject {
                 }
                 return try await afterMutation(result.text ?? "Clicked")
             } catch {
+                if let frame = lastAXEntries[token]?.frame {
+                    NSRunningApplication(processIdentifier: pid_t(pid))?.activate()
+                    try await Task.sleep(for: .milliseconds(100))
+                    CGEventClicker.click(at: CGPoint(x: frame.midX, y: frame.midY))
+                    Log.agent.info("stage=click fallback=known-frame token=\(token, privacy: .public)")
+                    return try await afterMutation("Clicked")
+                }
                 guard Self.shouldRetryAfterActivate(error) else { throw error }
                 NSRunningApplication(processIdentifier: pid_t(pid))?.activate()
                 try await Task.sleep(for: .milliseconds(200))
@@ -683,16 +709,13 @@ final class AgentRunner: ObservableObject {
                 try await Task.sleep(for: .milliseconds(100))
                 CGEventClicker.click(at: point)
                 try await Task.sleep(for: .milliseconds(100))
-                let result = try await measureCua {
-                    try await CuaDriver.shared.type(
+                return try await afterMutation(
+                    try await typeTextInProcess(
                         pid: pid,
                         text: text,
-                        token: nil,
-                        windowId: lastWindowID
+                        fallback: "Typed text",
+                        windowID: lastWindowID
                     )
-                }
-                return try await afterMutation(
-                    verifiedTypingResult(pid: pid, text: text, fallback: result.text ?? "Typed text")
                 )
             }
             if let token, token.hasPrefix("ax:") {
@@ -704,31 +727,25 @@ final class AgentRunner: ObservableObject {
                 } catch {
                     Log.agent.info("AX focus failed; typing into current focus error=\(error.localizedDescription, privacy: .public)")
                 }
-                let result = try await measureCua {
-                    try await CuaDriver.shared.type(
+                return try await afterMutation(
+                    try await typeTextInProcess(
                         pid: pid,
                         text: text,
-                        token: nil,
-                        windowId: lastWindowID
+                        fallback: "Typed text",
+                        windowID: lastWindowID
                     )
-                }
-                return try await afterMutation(
-                    verifiedTypingResult(pid: pid, text: text, fallback: result.text ?? "Typed text")
                 )
             }
             if token == nil {
                 try await focusTextElementIfNeeded(pid: pid)
             }
-            let result = try await measureCua {
-                try await CuaDriver.shared.type(
+            return try await afterMutation(
+                try await typeTextInProcess(
                     pid: pid,
                     text: text,
-                    token: token,
-                    windowId: token == nil ? lastWindowID : nil
+                    fallback: "Typed text",
+                    windowID: token == nil ? lastWindowID : nil
                 )
-            }
-            return try await afterMutation(
-                verifiedTypingResult(pid: pid, text: text, fallback: result.text ?? "Typed text")
             )
         case "press_key":
             guard let key = call.arguments["key"]?.stringValue,
@@ -750,7 +767,8 @@ final class AgentRunner: ObservableObject {
                 if AXMenuBar.pressMenuItem(
                     pid: pid_t(pid),
                     key: key,
-                    modifiers: modifiers
+                    modifiers: modifiers,
+                    goal: currentGoal
                 ) {
                     return try await afterMutation("Pressed \(key)")
                 }
@@ -784,6 +802,7 @@ final class AgentRunner: ObservableObject {
             forceOCRRequested = true
         }
         let wakeRequested = arguments["wake"]?.boolValue == true
+        let fullObserve = arguments["full"]?.boolValue == true
         var runningApps = try await apps()
         let explicit = arguments["app"]?.stringValue
         if let explicit, !explicit.isEmpty {
@@ -861,23 +880,25 @@ final class AgentRunner: ObservableObject {
                 let candidateFrame = Self.cgRect(candidate.frame)
                 let nativeSnapshot = Config.shared.nativeAXEnabled
                     ? await Task.detached(priority: .userInitiated) {
-                        AXTreeReader.snapshot(
-                            pid: app.pid,
-                            windowFrame: candidateFrame
+                    AXTreeReader.snapshot(
+                        pid: app.pid,
+                        windowFrame: candidateFrame,
+                        full: fullObserve
                         )
                     }.value
                     : nil
                 if let ax = nativeSnapshot {
                     let axElapsed = Date().timeIntervalSince(treeStarted)
                     Log.agent.info(
-                        "stage=axtree elements=\(ax.snapshot.elements.count) interactive=\(ax.snapshot.elements.filter { AXTreeReader.interactiveRoles.contains($0.role) }.count) elapsed=\(axElapsed)"
+                        "stage=axtree elements=\(ax.snapshot.elements.count) partial=\(ax.snapshot.partial) interactive=\(ax.snapshot.elements.filter { AXTreeReader.interactiveRoles.contains($0.role) }.count) elapsed=\(axElapsed)"
                     )
                     candidateSnapshot = CuaSnapshot(
                         snapshotId: ax.snapshot.snapshotId,
                         treeMarkdown: ax.snapshot.treeMarkdown,
                         elements: ax.snapshot.elements,
                         image: ax.snapshot.image,
-                        source: .ax
+                        source: .ax,
+                        partial: ax.snapshot.partial
                     )
                     candidateEntries = ax.entries
                     if wantsImage && Permission.screenRecording.isGranted {
@@ -893,7 +914,9 @@ final class AgentRunner: ObservableObject {
                             snapshotId: candidateSnapshot.snapshotId,
                             treeMarkdown: candidateSnapshot.treeMarkdown,
                             elements: candidateSnapshot.elements,
-                            image: imageSnapshot.image
+                            image: imageSnapshot.image,
+                            source: candidateSnapshot.source,
+                            partial: candidateSnapshot.partial
                         )
                     }
                 } else {
@@ -943,6 +966,7 @@ final class AgentRunner: ObservableObject {
             snapshot: selectedSnapshot,
             axEntries: chosenWindow == nil ? firstEntries : chosenEntries,
             wake: wakeRequested
+            , full: fullObserve
         )
     }
 
@@ -953,7 +977,8 @@ final class AgentRunner: ObservableObject {
         reportedApps: [CuaApp],
         snapshot: CuaSnapshot?,
         axEntries: [String: AXEntry],
-        wake: Bool = false
+        wake: Bool = false,
+        full: Bool = false
     ) async throws -> ToolOutput {
         Log.cua.info(
             "chosen window title=\(window.title, privacy: .public) app=\(app.name, privacy: .public)"
@@ -969,21 +994,23 @@ final class AgentRunner: ObservableObject {
                 ? await Task.detached(priority: .userInitiated) {
                     AXTreeReader.snapshot(
                         pid: app.pid,
-                        windowFrame: nativeWindowFrame
+                        windowFrame: nativeWindowFrame,
+                        full: full
                     )
                 }.value
                 : nil
             if let ax = nativeSnapshot {
                 let axElapsed = Date().timeIntervalSince(treeStarted)
                 Log.agent.info(
-                    "stage=axtree elements=\(ax.snapshot.elements.count) interactive=\(ax.snapshot.elements.filter { AXTreeReader.interactiveRoles.contains($0.role) }.count) elapsed=\(axElapsed)"
+                    "stage=axtree elements=\(ax.snapshot.elements.count) partial=\(ax.snapshot.partial) interactive=\(ax.snapshot.elements.filter { AXTreeReader.interactiveRoles.contains($0.role) }.count) elapsed=\(axElapsed)"
                 )
                 resolvedSnapshot = CuaSnapshot(
                     snapshotId: ax.snapshot.snapshotId,
                     treeMarkdown: ax.snapshot.treeMarkdown,
                     elements: ax.snapshot.elements,
                     image: ax.snapshot.image,
-                    source: .ax
+                    source: .ax,
+                    partial: ax.snapshot.partial
                 )
                 resolvedAXEntries = ax.entries
                 if includeImage && Permission.screenRecording.isGranted {
@@ -1000,7 +1027,8 @@ final class AgentRunner: ObservableObject {
                         treeMarkdown: resolvedSnapshot.treeMarkdown,
                         elements: resolvedSnapshot.elements,
                         image: imageSnapshot.image,
-                        source: .ax
+                        source: .ax,
+                        partial: resolvedSnapshot.partial
                     )
                 }
             } else {
@@ -1029,7 +1057,8 @@ final class AgentRunner: ObservableObject {
                     treeMarkdown: refreshed.snapshot.treeMarkdown,
                     elements: refreshed.snapshot.elements,
                     image: refreshed.snapshot.image,
-                    source: .ax
+                    source: .ax,
+                    partial: refreshed.snapshot.partial
                 )
                 resolvedAXEntries = refreshed.entries
             }
@@ -1070,7 +1099,8 @@ final class AgentRunner: ObservableObject {
                     treeMarkdown: resolvedSnapshot.treeMarkdown,
                     elements: resolvedSnapshot.elements + cdpElements,
                     image: resolvedSnapshot.image,
-                    source: .cdp
+                    source: .cdp,
+                    partial: resolvedSnapshot.partial
                 )
                 lastCDPTitle = window.title
                 lastCDPPort = Config.shared.cdpPort
@@ -1107,7 +1137,8 @@ final class AgentRunner: ObservableObject {
                     treeMarkdown: mergedSnapshot.treeMarkdown + "\n" + lines,
                     elements: mergedSnapshot.elements + hits.map(\.element),
                     image: mergedSnapshot.image,
-                    source: mergedSnapshot.source
+                    source: mergedSnapshot.source,
+                    partial: mergedSnapshot.partial
                 )
                 ocrPoints = Dictionary(uniqueKeysWithValues: hits.map {
                     ($0.element.token, $0.point)
@@ -1356,6 +1387,32 @@ final class AgentRunner: ObservableObject {
         }
     }
 
+    private func typeTextInProcess(
+        pid: Int,
+        text: String,
+        fallback: String,
+        windowID: Int?
+    ) async throws -> String {
+        KeyboardFocus.typeUnicode(text)
+        let result = verifiedTypingResult(pid: pid, text: text, fallback: fallback)
+        guard result.localizedCaseInsensitiveContains("did not show") else {
+            return result
+        }
+        let helper = try await measureCua {
+            try await CuaDriver.shared.type(
+                pid: pid,
+                text: text,
+                token: nil,
+                windowId: windowID
+            )
+        }
+        return verifiedTypingResult(
+            pid: pid,
+            text: text,
+            fallback: helper.text ?? fallback
+        )
+    }
+
     private func typedTextVisible(goal: String, snapshot: CuaSnapshot?) -> Bool? {
         guard let expected = SlotExtractor.typedText(from: goal) else { return nil }
         guard let snapshot else { return false }
@@ -1391,16 +1448,20 @@ final class AgentRunner: ObservableObject {
 
     func isRisky(token: String?, key: String?) -> Bool {
         let label = token.flatMap { lastSnapshot?.element(token: $0)?.label }?.lowercased() ?? ""
-        if AgentRisk.matchesDestructiveWord(label) { return true }
+        if AgentRisk.matchesDestructiveWord(label)
+            || (isBrowserTarget && AgentRisk.matchesBrowserRisk(label)) {
+            return true
+        }
         guard let key = key?.lowercased(), key == "return" || key == "enter" else { return false }
         let latestLabel = (lastSnapshot?.elements.last?.label ?? "").lowercased()
         return AgentRisk.matchesDestructiveWord(latestLabel)
+            || (isBrowserTarget && AgentRisk.matchesBrowserRisk(latestLabel))
     }
 
     private func confirmSubmit(goal: String) async throws {
         guard !preConfirmed else { return }
         guard AgentRisk.matchesDestructiveGoal(goal)
-                || AgentRisk.matchesDestructiveWord(goal) else {
+                || (isBrowserTarget && AgentRisk.matchesBrowserGoal(goal)) else {
             return
         }
         if !steps.isEmpty {
@@ -1411,6 +1472,14 @@ final class AgentRunner: ObservableObject {
         pendingConfirmation = false
         guard allowed else {
             throw AgentError.api("user declined; choose another approach or fail")
+        }
+    }
+
+    private var isBrowserTarget: Bool {
+        let names = ["Safari", "Google Chrome", "Chrome", "Arc", "Brave", "Firefox", "Edge"]
+        return siteHost != nil || names.contains {
+            guard let targetApp else { return false }
+            return targetApp.localizedCaseInsensitiveCompare($0) == .orderedSame
         }
     }
 
