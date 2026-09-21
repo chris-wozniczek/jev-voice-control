@@ -299,16 +299,27 @@ enum Executor {
             }
         }
         try? await Task.sleep(for: .milliseconds(150))
-        if TextEntry.verifyTyped(pid: pid, text: text) {
+        switch TextEntry.readBack(pid: pid, text: text) {
+        case .confirmed:
             return "Typed \"\(text)\""
+        case .unobservable:
+            Log.agent.info("type readback=unobservable (unverified)")
+            return "Typed \"\(text)\""
+        case .missing:
+            Log.agent.info("type readback=miss")
         }
         _ = try? await CuaDriver.shared.type(pid: Int(pid), text: text)
         try? await Task.sleep(for: .milliseconds(150))
-        guard TextEntry.verifyTyped(pid: pid, text: text) else {
+        switch TextEntry.readBack(pid: pid, text: text) {
+        case .confirmed:
+            return "Typed \"\(text)\""
+        case .unobservable:
+            Log.agent.info("type readback=unobservable (unverified)")
+            return "Typed \"\(text)\""
+        case .missing:
             let name = application.localizedName ?? frontmostApp ?? "the app"
             return "Couldn't type into \(name) — the text didn't appear"
         }
-        return "Typed \"\(text)\""
     }
 
     private static func runSystem(_ action: SystemAction, percent: Int?) throws -> String {

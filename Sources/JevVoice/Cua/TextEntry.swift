@@ -7,7 +7,6 @@ enum TextEntry {
         "AXTextArea",
         "AXSearchField",
         "AXComboBox",
-        "AXWebArea",
     ]
 
     private static let preferredTerms = [
@@ -119,12 +118,7 @@ enum TextEntry {
         if (attribute(element, "AXEditable" as CFString) as? Bool) == true {
             return true
         }
-        var settable = DarwinBoolean(false)
-        return AXUIElementIsAttributeSettable(
-            element,
-            kAXValueAttribute as CFString,
-            &settable
-        ) == .success && settable.boolValue
+        return false
     }
 
     private static func role(of element: AXUIElement) -> String {

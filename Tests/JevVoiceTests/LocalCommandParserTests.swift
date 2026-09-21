@@ -85,6 +85,7 @@ final class LocalCommandParserTests: XCTestCase {
             ("type the message hi", "hi"),
             ("type in hello", "hello"),
             ("type out hello", "hello"),
+            ("type this is fine", "this is fine"),
             ("enter hello", "hello"),
             ("type prompt", nil),
         ]

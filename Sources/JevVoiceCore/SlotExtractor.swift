@@ -78,7 +78,7 @@ public enum SlotExtractor {
             text.removeFirst()
             text = text.trimmingCharacters(in: .whitespacesAndNewlines)
         }
-        let fillerWords = ["prompt", "message", "text", "following", "this"]
+        let fillerWords = ["prompt", "message", "text", "following"]
         let fillerPrefixes = (
             fillerWords
                 + ["the", "a", "this"].flatMap { article in

@@ -61,6 +61,7 @@ final class JevStepPlanner: ActionPlanner {
     private var closeShortcutIssued = false
     private var recentFingerprints: [String] = []
     private var initialControlTexts: Set<String>?
+    private var previousElementCount: Int?
 
     private let interactiveRoles: Set<String> = [
         "AXButton", "AXLink", "AXTextField", "AXTextArea", "AXMenuItem",
@@ -87,6 +88,8 @@ final class JevStepPlanner: ActionPlanner {
                 )
             )
         }
+        let previousElementCount = self.previousElementCount
+        self.previousElementCount = snapshot.elements.count
 
         let candidates = makeCandidates(
             snapshot.elements,
@@ -292,7 +295,18 @@ final class JevStepPlanner: ActionPlanner {
                 "\($0.role)|\($0.label)|\($0.value ?? "")"
             })
         }
-        if hasMutation,
+        let goalWords = GoalWords.words(ctx.goal)
+        let lastGoalSharingClick = ctx.history.last.flatMap { record -> PlannerStepRecord? in
+            guard record.succeeded,
+                  ["click", "click_at"].contains(record.tool),
+                  !goalWords.isDisjoint(with: GoalWords.words(record.resultText)) else {
+                return nil
+            }
+            return record
+        }
+        if let previousElementCount,
+           snapshot.elements.count <= previousElementCount,
+           lastGoalSharingClick != nil,
            let initialControlTexts,
            snapshot.elements.contains(where: { element in
                let key = "\(element.role)|\(element.label)|\(element.value ?? "")"

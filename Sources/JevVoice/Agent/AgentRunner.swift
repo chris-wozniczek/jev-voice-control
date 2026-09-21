@@ -1187,8 +1187,8 @@ final class AgentRunner: ObservableObject {
         case .confirmed:
             return fallback
         case .unobservable:
-            Log.agent.info("type readback=unobservable")
-            return "\(fallback) (unverified)"
+            Log.agent.info("type readback=unobservable (unverified)")
+            return fallback
         case .missing:
             Log.agent.info("type readback=miss")
             KeyboardFocus.typeUnicode(text)
@@ -1203,8 +1203,8 @@ final class AgentRunner: ObservableObject {
             case .confirmed:
                 return fallback
             case .unobservable:
-                Log.agent.info("type readback=unobservable")
-                return "\(fallback) (unverified)"
+                Log.agent.info("type readback=unobservable (unverified)")
+                return fallback
             case .missing:
                 return "Typed \(text) but the field did not show it"
             }

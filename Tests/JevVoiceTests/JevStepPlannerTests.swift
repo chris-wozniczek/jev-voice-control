@@ -204,18 +204,41 @@ final class JevStepPlannerTests: XCTestCase {
         _ = try await planner.next(PlannerContext(
             goal: "change model to SWE-2 High",
             snapshot: snapshot([
-                CuaElement(token: "tok-model", role: "AXButton", label: "SWE-2 High Free", value: nil),
+                CuaElement(token: "tok-model", role: "AXButton", label: "Model", value: nil),
             ])
         ))
+        let options = try await planner.next(PlannerContext(
+            goal: "change model to SWE-2 High",
+            snapshot: snapshot([
+                CuaElement(token: "tok-model", role: "AXButton", label: "Model", value: nil),
+                CuaElement(token: "tok-option", role: "AXMenuItem", label: "SWE-2 High Free", value: nil),
+            ]),
+            history: [
+                PlannerStepRecord(
+                    tool: "click",
+                    argsSummary: "element_token=tok-model",
+                    resultText: "Opened model options",
+                    succeeded: true
+                ),
+            ],
+            stepIndex: 1
+        ))
+        XCTAssertNotEqual(options.toolCalls.first?.name, "done")
+
         let turn = try await planner.next(PlannerContext(
             goal: "change model to SWE-2 High",
             snapshot: snapshot([
                 CuaElement(token: "tok-model", role: "AXButton", label: "SWE-2 High", value: nil),
             ]),
             history: [
-                PlannerStepRecord(tool: "click", argsSummary: "element_token=tok-model", resultText: "Clicked", succeeded: true),
+                PlannerStepRecord(
+                    tool: "click",
+                    argsSummary: "element_token=tok-option",
+                    resultText: "Selected SWE-2 High",
+                    succeeded: true
+                ),
             ],
-            stepIndex: 1
+            stepIndex: 2
         ))
         XCTAssertEqual(turn.toolCalls.first?.name, "done")
     }
