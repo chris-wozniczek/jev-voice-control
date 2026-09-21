@@ -80,6 +80,17 @@ final class AgentTests: XCTestCase {
     }
 
     @MainActor
+    func testOrderedVocabularyIncludesSiteNamesAndAliases() {
+        let vocabulary = SpeechRecognizer.orderedVocabulary(
+            extra: [],
+            appNames: [],
+            siteNames: ["X", "x.com"]
+        )
+        XCTAssertTrue(vocabulary.contains("X"))
+        XCTAssertTrue(vocabulary.contains("x.com"))
+    }
+
+    @MainActor
     func testRoutingHeuristic() {
         let safe = ExecutionPolicy.Verdict.run
         for transcript in [
@@ -345,6 +356,32 @@ final class AgentTests: XCTestCase {
         AgentRunner.shared.setSnapshotForTesting(snapshot)
         XCTAssertTrue(AgentRunner.shared.isRisky(token: "cdp:1", key: nil))
         AgentRunner.shared.setSnapshotForTesting(nil)
+    }
+
+    @MainActor
+    func testPreConfirmedAgentActionDoesNotRequestConfirmation() async throws {
+        var confirmationCount = 0
+        AgentRunner.shared.confirmationHandler = { _ in
+            confirmationCount += 1
+        }
+        defer {
+            AgentRunner.shared.confirmationHandler = nil
+        }
+        let call = DeepSeekToolCall(
+            id: "test",
+            name: "click",
+            arguments: ["element_token": .string("cdp:1")]
+        )
+        do {
+            _ = try await AgentRunner.shared.executeForTesting(
+                call,
+                context: AgentContext(preConfirmed: true)
+            )
+            XCTFail("Expected missing CDP observation error")
+        } catch {
+            XCTAssertTrue(error.localizedDescription.contains("Observe a Chrome page first"))
+        }
+        XCTAssertEqual(confirmationCount, 0)
     }
 
     @MainActor

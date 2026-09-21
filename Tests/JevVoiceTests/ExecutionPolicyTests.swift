@@ -111,4 +111,33 @@ final class ExecutionPolicyTests: XCTestCase {
             .run
         )
     }
+
+    func testSafetyPolicyRejectsBeforeExistingRules() {
+        let policy = SafetyPolicy(
+            blocked: [.init(pattern: #"\bpassword\b"#, reason: "credentials are blocked")],
+            confirm: ["send"]
+        )
+        XCTAssertEqual(
+            ExecutionPolicy.verdict(
+                for: [Decision(clause: "send my password", action: .uiTask)],
+                alwaysConfirm: false,
+                policy: policy,
+                transcript: "send my password"
+            ),
+            .reject(reason: "credentials are blocked")
+        )
+    }
+
+    func testSafetyPolicyConfirmPrecedesExistingRules() {
+        let policy = SafetyPolicy(blocked: [], confirm: ["send"])
+        XCTAssertEqual(
+            ExecutionPolicy.verdict(
+                for: [Decision(clause: "send the message", action: .uiTask)],
+                alwaysConfirm: false,
+                policy: policy,
+                transcript: "send the message"
+            ),
+            .confirm(reason: "This will send — confirm?")
+        )
+    }
 }

@@ -1,0 +1,31 @@
+{
+  "blocked": [
+    {
+      "pattern": "\\b(rm -rf|sudo|mkfs|diskutil erase)\\b",
+      "reason": "shell commands are blocked"
+    },
+    {
+      "pattern": "\\b(pay|checkout|buy now|place order|purchase)\\b",
+      "reason": "payments are blocked"
+    },
+    {
+      "pattern": "\\b(keychain|password|passcode)\\b",
+      "reason": "credentials are blocked"
+    },
+    {
+      "pattern": "\\b(empty (the )?trash|erase (all|disk)|format (the )?disk)\\b",
+      "reason": "irreversible file operations are blocked"
+    }
+  ],
+  "confirm": [
+    "send",
+    "submit",
+    "post",
+    "publish",
+    "tweet",
+    "reply",
+    "delete",
+    "remove",
+    "empty trash"
+  ]
+}

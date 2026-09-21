@@ -37,6 +37,8 @@ final class VoiceController: ObservableObject {
     private var cancellables: Set<AnyCancellable> = []
     private var startTask: Task<Void, Never>?
     private var confirmationTimeoutTask: Task<Void, Never>?
+    private var preConfirmedExecution = false
+    private var pendingConfirmedRun: (() async -> Void)?
     private var taskStartedAt: Date?
     private var frontmostObserver: NSObjectProtocol?
     private(set) var lastExternalFrontmostApp: String?
@@ -189,8 +191,13 @@ final class VoiceController: ObservableObject {
                 suggestionClause = ""
                 recognizer.contextualStrings = SpeechRecognizer.orderedVocabulary(
                     extra: config.customVocabulary,
-                    appNames: AppRegistry.shared.spokenVariants
+                    appNames: AppRegistry.shared.spokenVariants,
+                    siteNames: WebSiteRegistry.shared.sites.flatMap {
+                        let shortHost = String($0.host.split(separator: ".").dropLast().joined(separator: "."))
+                        return [$0.host, shortHost, shortHost.capitalized] + $0.names
+                    }
                 )
+                recognizer.frontmostApp = lastExternalFrontmostApp
                 try recognizer.start()
                 status = .listening
                 onListeningChanged?(true)
@@ -259,12 +266,18 @@ final class VoiceController: ObservableObject {
         let verdict = ExecutionPolicy.verdict(
             for: decisions,
             alwaysConfirm: config.alwaysConfirm,
-            previewGeneratedText: config.previewGeneratedText
+            previewGeneratedText: config.previewGeneratedText,
+            policy: config.safetyPolicy,
+            transcript: text
         )
         Log.command.info("verdict=\(String(describing: verdict), privacy: .public)")
-        let routesToAgent = shouldUseComputerAgent(
+        let policyVerdict = config.safetyPolicy?.verdict(for: text)
+        var routesToAgent = shouldUseComputerAgent(
             transcript: text, decisions: decisions, verdict: verdict, error: interpretationError
         )
+        if case .reject = policyVerdict {
+            routesToAgent = false
+        }
         Log.command.info("route=\(routesToAgent ? "agent" : "local", privacy: .public)")
         if !routesToAgent,
            !decisions.contains(where: { $0.action != .none }),
@@ -272,7 +285,15 @@ final class VoiceController: ObservableObject {
             return
         }
         if routesToAgent {
-            await agentFallback(transcript: text)
+            if case .confirm(let reason) = verdict {
+                pendingConfirmedRun = { [weak self] in
+                    await self?.agentFallback(transcript: text, preConfirmed: true)
+                }
+                preConfirmedExecution = true
+                await requestVoiceConfirmation(reason: reason)
+            } else {
+                await agentFallback(transcript: text)
+            }
             return
         }
         if let interpretationError {
@@ -286,6 +307,8 @@ final class VoiceController: ObservableObject {
         case .run:
             await executeAll()
         case .confirm(let reason):
+            pendingConfirmedRun = nil
+            preConfirmedExecution = true
             await requestVoiceConfirmation(reason: reason)
         case .reject(let reason):
             if !routesToAgent, await offerSuggestions(for: text, decisions: decisions) {
@@ -474,7 +497,15 @@ final class VoiceController: ObservableObject {
         confirmationTimeoutTask?.cancel()
         awaitingVoiceAnswer = false
         recognizer.stop()
-        await executeAll()
+        if let pendingConfirmedRun {
+            self.pendingConfirmedRun = nil
+            preConfirmedExecution = false
+            await pendingConfirmedRun()
+            return
+        }
+        let preConfirmed = preConfirmedExecution
+        preConfirmedExecution = false
+        await executeAll(preConfirmed: preConfirmed)
     }
 
     func dismiss() {
@@ -485,6 +516,8 @@ final class VoiceController: ObservableObject {
         confirmationTimeoutTask?.cancel()
         confirmationTimeoutTask = nil
         awaitingVoiceAnswer = false
+        preConfirmedExecution = false
+        pendingConfirmedRun = nil
         recognizer.stop()
         guard status == .awaitingConfirm || status == .listening else { return }
         decisions = []
@@ -494,7 +527,7 @@ final class VoiceController: ObservableObject {
         completeTask()
     }
 
-    private func executeAll() async {
+    private func executeAll(preConfirmed: Bool = false) async {
         let actionable = decisions.filter { $0.action != .none }
         guard !actionable.isEmpty else {
             let reason = agentUnavailableReason()
@@ -529,7 +562,8 @@ final class VoiceController: ObservableObject {
                         context: AgentContext(
                             frontmostApp: target,
                             siteHost: decision.siteHost,
-                            generatedText: decision.generatedText
+                            generatedText: decision.generatedText,
+                            preConfirmed: preConfirmed
                         )
                     )
                     switch outcome {

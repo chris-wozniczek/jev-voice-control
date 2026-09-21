@@ -58,6 +58,7 @@ final class AgentRunner: ObservableObject {
     private var forcedOCRUsed = false
     private var forceOCRRequested = false
     private var lastScreenshotScale: CGFloat = 1
+    private var preConfirmed = false
 
     var hintStore: HintStore = .shared
     var appsProvider: (() async throws -> [CuaApp])?
@@ -119,6 +120,7 @@ final class AgentRunner: ObservableObject {
         forcedOCRUsed = false
         forceOCRRequested = false
         lastScreenshotScale = 1
+        preConfirmed = context.preConfirmed
         let runStarted = Date()
         targetApp = context.frontmostApp
         currentGoal = goal
@@ -432,8 +434,14 @@ final class AgentRunner: ObservableObject {
         lastOCRPoints = points
     }
 
-    func executeForTesting(_ call: DeepSeekToolCall) async throws -> ToolOutput {
-        try await execute(call)
+    func executeForTesting(
+        _ call: DeepSeekToolCall,
+        context: AgentContext = AgentContext()
+    ) async throws -> ToolOutput {
+        let previousPreConfirmed = preConfirmed
+        preConfirmed = context.preConfirmed
+        defer { preConfirmed = previousPreConfirmed }
+        return try await execute(call)
     }
 
     func apps(forceRefresh: Bool = false) async throws -> [CuaApp] {
@@ -1314,6 +1322,7 @@ final class AgentRunner: ObservableObject {
     }
 
     private func confirmIfRisky(tool: String, token: String?, key: String?) async throws {
+        guard !preConfirmed else { return }
         guard isRisky(token: token, key: key) else { return }
         let reason = "This \(tool) may be destructive"
         if !steps.isEmpty {
@@ -1336,6 +1345,7 @@ final class AgentRunner: ObservableObject {
     }
 
     private func confirmSubmit(goal: String) async throws {
+        guard !preConfirmed else { return }
         guard AgentRisk.matchesDestructiveGoal(goal)
                 || AgentRisk.matchesDestructiveWord(goal) else {
             return
@@ -1482,11 +1492,18 @@ struct AgentContext {
     var frontmostApp: String?
     var siteHost: String?
     var generatedText: String?
+    var preConfirmed: Bool
 
-    init(frontmostApp: String? = nil, siteHost: String? = nil, generatedText: String? = nil) {
+    init(
+        frontmostApp: String? = nil,
+        siteHost: String? = nil,
+        generatedText: String? = nil,
+        preConfirmed: Bool = false
+    ) {
         self.frontmostApp = frontmostApp
         self.siteHost = siteHost
         self.generatedText = generatedText
+        self.preConfirmed = preConfirmed
     }
 }
 

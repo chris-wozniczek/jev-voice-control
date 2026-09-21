@@ -26,6 +26,8 @@ final class LocalCommandParserTests: XCTestCase {
             ("open settings", .openApp, "System Settings", nil, nil),
             ("type hello world", .dictate, nil, "hello world", nil),
             ("search for banana in google", .webSearch, nil, "banana", nil),
+            ("check the last Juventus game", .webSearch, nil, "last Juventus game", nil),
+            ("who is Juventus coach", .webSearch, nil, "who is Juventus coach", nil),
             ("go to github.com", .openURL, nil, nil, nil),
             ("mute", .system, nil, nil, nil),
             ("volume 40 percent", .system, nil, nil, 40),

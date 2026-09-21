@@ -306,6 +306,9 @@ public final class CommandInterpreter {
             action = .webSearch
             query = q
         }
+        if action == .webSearch, query == nil {
+            query = SlotExtractor.fallbackSearchQuery(from: clause)
+        }
         let localMatch = refersToFrontmost
             ? nil : AppMatcher.match(
                 clause: clause, installedApps: installedApps, aliases: aliases

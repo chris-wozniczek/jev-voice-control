@@ -150,6 +150,10 @@ final class Config: ObservableObject {
         }
     }
 
+    @Published var endOfTurnJudgeEnabled: Bool {
+        didSet { UserDefaults.standard.set(endOfTurnJudgeEnabled, forKey: "endOfTurnJudgeEnabled") }
+    }
+
     @Published var speechEngine: SpeechEngineKind {
         didSet { UserDefaults.standard.set(speechEngine.rawValue, forKey: "speechEngine") }
     }
@@ -167,6 +171,9 @@ final class Config: ObservableObject {
     @Published var customVocabulary: [String] {
         didSet { UserDefaults.standard.set(customVocabulary, forKey: "customVocabulary") }
     }
+
+    @Published private(set) var safetyPolicy: SafetyPolicy?
+    @Published private(set) var safetyPolicyPath: String?
 
     @Published var whisperModel: String {
         didSet { UserDefaults.standard.set(whisperModel, forKey: "whisperModel") }
@@ -218,6 +225,7 @@ final class Config: ObservableObject {
         let timeout = defaults.object(forKey: "silenceTimeout") as? Double
             ?? HearingSettings.defaultSilenceTimeout
         self.silenceTimeout = HearingSettings.constrainedSilenceTimeout(timeout)
+        self.endOfTurnJudgeEnabled = defaults.object(forKey: "endOfTurnJudgeEnabled") as? Bool ?? true
         if let storedSpeechEngine = defaults.string(forKey: "speechEngine"),
            let speechEngine = SpeechEngineKind(rawValue: storedSpeechEngine) {
             self.speechEngine = speechEngine
@@ -232,5 +240,45 @@ final class Config: ObservableObject {
         self.customVocabulary = defaults.stringArray(forKey: "customVocabulary")
             ?? ["x.com", "Grok", "Devin", "cmux", "ChatGPT", "Claude", "Gemini", "GitHub"]
         self.whisperModel = defaults.string(forKey: "whisperModel") ?? "openai_whisper-small"
+        let loadedPolicy = Self.loadSafetyPolicy()
+        self.safetyPolicy = loadedPolicy.policy
+        self.safetyPolicyPath = loadedPolicy.path
+    }
+
+    private static func loadSafetyPolicy() -> (policy: SafetyPolicy?, path: String?) {
+        let userURL = FileManager.default.urls(
+            for: .applicationSupportDirectory, in: .userDomainMask
+        )[0]
+            .appendingPathComponent("Jev Voice", isDirectory: true)
+            .appendingPathComponent("policy.json")
+        if let data = try? Data(contentsOf: userURL) {
+            if let policy = try? SafetyPolicy.load(from: data) {
+                Log.command.info("safety policy loaded path=\(userURL.path, privacy: .public)")
+                return (policy, userURL.path)
+            }
+            Log.command.info("safety policy invalid path=\(userURL.path, privacy: .public)")
+        }
+
+        var bundles = [Bundle.main]
+        if let url = Bundle.main.url(
+            forResource: "JevVoice_JevVoice",
+            withExtension: "bundle"
+        ), let bundle = Bundle(url: url) {
+            bundles.append(bundle)
+        }
+#if DEBUG
+        bundles.append(Bundle.module)
+#endif
+        for bundle in bundles {
+            guard let url = bundle.url(forResource: "policy", withExtension: "json"),
+                  let data = try? Data(contentsOf: url),
+                  let policy = try? SafetyPolicy.load(from: data) else {
+                continue
+            }
+            Log.command.info("safety policy loaded path=\(url.path, privacy: .public)")
+            return (policy, url.path)
+        }
+        Log.command.info("safety policy unavailable")
+        return (nil, nil)
     }
 }

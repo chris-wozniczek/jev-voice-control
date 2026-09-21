@@ -11,9 +11,13 @@ final class SpeechRecognizer: ObservableObject {
         "Grok", "GPT", "Fusion", "cmux", "oMLX", "Whisper",
     ]
 
-    static func orderedVocabulary(extra: [String], appNames: [String]) -> [String] {
+    static func orderedVocabulary(
+        extra: [String],
+        appNames: [String],
+        siteNames: [String] = []
+    ) -> [String] {
         var seen = Set<String>()
-        return (extra + builtInVocabulary + appNames).filter {
+        return (extra + builtInVocabulary + appNames + siteNames).filter {
             seen.insert($0.lowercased()).inserted
         }
     }
@@ -25,10 +29,14 @@ final class SpeechRecognizer: ObservableObject {
     var onFinalTranscript: ((String) -> Void)?
     var contextualStrings: [String] = []
     var onEndedWithoutSpeech: ((Error?) -> Void)?
+    var frontmostApp: String?
+    private(set) var lastFinalTranscript: String?
 
     private var engine: SpeechEngine?
     private var silenceTimer: Timer?
     private var silenceGate = SilenceGate()
+    private var transcriptGeneration = 0
+    private var pauseProbeInFlight = false
 
     static func requestAuthorization() async -> Bool {
         let speechStatus = await withCheckedContinuation { continuation in
@@ -73,6 +81,14 @@ final class SpeechRecognizer: ObservableObject {
         engine.onSilence = Config.shared.listeningMode == .toggle
             ? { [weak self] in self?.stop() }
             : nil
+        engine.onSpeechPause = Config.shared.listeningMode == .toggle
+            && Config.shared.endOfTurnJudgeEnabled
+            ? { [weak self] text in
+                Task { @MainActor in
+                    await self?.judgeEndOfTurn(text: text)
+                }
+            }
+            : nil
         engine.onStatus = { [weak self] message in
             self?.statusMessage = message
         }
@@ -112,6 +128,8 @@ final class SpeechRecognizer: ObservableObject {
         guard isRunning else { return }
         transcript = text
         if !text.isEmpty {
+            transcriptGeneration += 1
+            pauseProbeInFlight = false
             if Config.shared.listeningMode == .toggle,
                silenceGate.shouldReschedule(partial: text) {
                 scheduleSilenceFinalize()
@@ -131,6 +149,9 @@ final class SpeechRecognizer: ObservableObject {
         let cleaned = stripEndWord(text)
         Log.speech.info("final transcript=\(cleaned, privacy: .public)")
         transcript = cleaned
+        if !cleaned.isEmpty {
+            lastFinalTranscript = cleaned
+        }
         engine = nil
         if cleaned.isEmpty {
             onEndedWithoutSpeech?(nil)
@@ -171,6 +192,70 @@ final class SpeechRecognizer: ObservableObject {
             Task { @MainActor in
                 self?.stop()
             }
+        }
+    }
+
+    private func judgeEndOfTurn(text: String) async {
+        guard isRunning,
+              Config.shared.listeningMode == .toggle,
+              Config.shared.endOfTurnJudgeEnabled,
+              !pauseProbeInFlight,
+              !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return
+        }
+        pauseProbeInFlight = true
+        let generation = transcriptGeneration
+        let started = Date()
+        struct State: Encodable {
+            let transcript: String
+            let previousCommand: String
+            let frontmostApp: String?
+        }
+        let client = JevClient(apiKey: Config.shared.apiKey)
+        let questions: [String: Question] = [
+            "complete": .noul(
+                instructions: "The transcript is a voice command to a computer assistant. Is it a complete command the speaker has finished saying (not cut off mid-phrase, not waiting for an object/argument)?"
+            )
+        ]
+        do {
+            let (response, _) = try await client.systemOne(
+                state: State(
+                    transcript: text,
+                    previousCommand: lastFinalTranscript ?? "",
+                    frontmostApp: frontmostApp
+                ),
+                questions: questions
+            )
+            guard isRunning, generation == transcriptGeneration, transcript == text else { return }
+            let probability: Double
+            if case .noul(let value) = response.answers["complete"] {
+                probability = value
+            } else {
+                return
+            }
+            let decision = EndOfTurnPolicy.decide(
+                probability: probability,
+                silenceTimeout: Config.shared.silenceTimeout
+            )
+            let decisionName: String
+            switch decision {
+            case .finalize:
+                decisionName = "finalize"
+                stop()
+            case .wait(let timeout):
+                decisionName = "wait"
+                engine?.silenceTimeoutOverride = timeout
+                scheduleSilenceFinalize(after: timeout)
+            case .timer:
+                decisionName = "timer"
+            }
+            Log.speech.info(
+                "eot judge p=\(probability) elapsed=\(Int(Date().timeIntervalSince(started) * 1000))ms decision=\(decisionName, privacy: .public) chars=\(text.count)"
+            )
+        } catch {
+            Log.speech.info(
+                "eot judge error=\(error.localizedDescription, privacy: .public) elapsed=\(Int(Date().timeIntervalSince(started) * 1000))ms decision=timer chars=\(text.count)"
+            )
         }
     }
 
