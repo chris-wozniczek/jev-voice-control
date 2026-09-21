@@ -177,13 +177,16 @@ final class AXTreeReaderTests: XCTestCase {
         XCTAssertEqual(result.count, 600)
     }
 
-    func testPastDeadlineReturnsNil() {
+    func testPastDeadlineReturnsPartialResult() {
         let root = FakeNode(role: "AXGroup", children: [
             FakeNode(role: "AXButton", title: "One"),
             FakeNode(role: "AXButton", title: "Two"),
             FakeNode(role: "AXButton", title: "Three"),
         ])
-        XCTAssertNil(AXTreeReader.walk(root, deadline: Date().addingTimeInterval(-1)))
+        XCTAssertEqual(
+            AXTreeReader.walk(root, deadline: Date().addingTimeInterval(-1))?.count,
+            0
+        )
     }
 
     func testDuplicateEntriesAreRemoved() throws {

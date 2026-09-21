@@ -3,10 +3,12 @@ import XCTest
 
 final class AgentRiskTests: XCTestCase {
     func testPostLabelIsRisky() {
-        XCTAssertTrue(AgentRisk.matchesDestructiveWord("Post"))
+        XCTAssertFalse(AgentRisk.matchesDestructiveWord("Post"))
+        XCTAssertTrue(AgentRisk.matchesBrowserRisk("Post"))
     }
 
     func testComposeGoalIsNotRisky() {
         XCTAssertFalse(AgentRisk.matchesDestructiveGoal("compose a post"))
+        XCTAssertTrue(AgentRisk.matchesBrowserGoal("post a message"))
     }
 }

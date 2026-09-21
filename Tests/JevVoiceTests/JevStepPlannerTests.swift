@@ -77,6 +77,25 @@ final class JevStepPlannerTests: XCTestCase {
     }
 
     @MainActor
+    func testDictationCandidatesExcludeRowsAndChooseTextArea() async throws {
+        let fake = FakeJev(
+            answer: .choice(choice: "e1", confidence: 0.9, probabilities: ["e1": 0.9])
+        )
+        let planner = JevStepPlanner(client: fake, canEscalate: false)
+        let turn = try await planner.next(PlannerContext(
+            goal: "type hello",
+            snapshot: snapshot([
+                CuaElement(token: "row", role: "AXRow", label: "Hello", value: nil),
+                CuaElement(token: "button", role: "AXButton", label: "Hello", value: nil),
+                CuaElement(token: "e1", role: "AXTextArea", label: "Message", value: nil),
+                CuaElement(token: "ocr:1", role: "AXStaticText", label: "Hello", value: nil),
+            ])
+        ))
+        XCTAssertEqual(turn.toolCalls.first?.name, "type_text")
+        XCTAssertEqual(turn.toolCalls.first?.arguments["element_token"]?.stringValue, "e1")
+    }
+
+    @MainActor
     func testCreationClickWithChangedSnapshotReturnsDoneWithoutSecondClick() async throws {
         let fake = FakeJev(answer: .choice(choice: "e1", confidence: 0.9, probabilities: ["e1": 0.9]))
         let planner = JevStepPlanner(client: fake, canEscalate: false)
