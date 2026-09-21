@@ -44,9 +44,19 @@ final class SpeechRecognizer: ObservableObject {
         cancel()
         transcript = ""
         silenceGate.reset()
-        let engine: SpeechEngine = Config.shared.speechEngine == .whisper
-            ? WhisperSpeechEngine()
-            : AppleSpeechEngine()
+        let engine: SpeechEngine
+        switch Config.shared.speechEngine {
+        case .apple:
+            engine = AppleSpeechEngine()
+        case .whisper:
+            engine = WhisperSpeechEngine()
+        case .appleStreaming:
+            if #available(macOS 26, *) {
+                engine = SpeechAnalyzerEngine()
+            } else {
+                engine = AppleSpeechEngine()
+            }
+        }
         engine.vocabulary = contextualStrings
         engine.onPartial = { [weak self] text in
             self?.receivePartial(text)

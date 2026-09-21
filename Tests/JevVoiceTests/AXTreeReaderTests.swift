@@ -36,6 +36,21 @@ private struct FakeNode: AXNode {
 }
 
 final class AXTreeReaderTests: XCTestCase {
+    func testLargeWindowWithSparseTreeNeedsRewalk() {
+        XCTAssertTrue(AXTreeReader.shouldRewalk(
+            interactiveCount: 9,
+            frame: CGRect(x: 0, y: 0, width: 401, height: 301)
+        ))
+        XCTAssertFalse(AXTreeReader.shouldRewalk(
+            interactiveCount: 10,
+            frame: CGRect(x: 0, y: 0, width: 401, height: 301)
+        ))
+        XCTAssertFalse(AXTreeReader.shouldRewalk(
+            interactiveCount: 9,
+            frame: CGRect(x: 0, y: 0, width: 400, height: 301)
+        ))
+    }
+
     func testInteractiveAndLabelledNodesAreEmitted() throws {
         let root = FakeNode(role: "AXGroup", children: [
             FakeNode(role: "AXButton", title: "New session"),
