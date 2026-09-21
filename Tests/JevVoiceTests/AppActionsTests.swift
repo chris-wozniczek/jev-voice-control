@@ -258,6 +258,78 @@ final class AppActionsTests: XCTestCase {
         XCTAssertEqual(turn.toolCalls.first?.name, "done")
         XCTAssertEqual(inner.calls, 1)
     }
+
+    @MainActor
+    func testFastPathDoneWhenActionChangesWindowSnapshot() async throws {
+        let inner = StubPlanner()
+        let action = AppAction(
+            app: "Devin",
+            bundleId: nil,
+            name: "new session",
+            phrases: ["new session"],
+            steps: [.key(key: "n", modifiers: ["command"])]
+        )
+        let planner = FastPathPlanner(action: action, inner: inner)
+        let before = CuaSnapshot(
+            snapshotId: "before",
+            treeMarkdown: "",
+            elements: [
+                CuaElement(token: "old", role: "AXRow", label: "Old session", value: nil),
+            ],
+            image: nil
+        )
+        let after = CuaSnapshot(
+            snapshotId: "after",
+            treeMarkdown: "",
+            elements: [
+                CuaElement(token: "new", role: "AXTextField", label: "New session", value: nil),
+            ],
+            image: nil
+        )
+
+        _ = try await planner.next(PlannerContext(goal: "new session", targetApp: "Devin"))
+        _ = try await planner.next(PlannerContext(
+            goal: "new session",
+            targetApp: "Devin",
+            windowTitle: "Sessions",
+            snapshot: before,
+            history: [
+                PlannerStepRecord(
+                    tool: "observe",
+                    argsSummary: "",
+                    resultText: "observed",
+                    succeeded: true
+                ),
+            ]
+        ))
+        let done = try await planner.next(PlannerContext(
+            goal: "new session",
+            targetApp: "Devin",
+            windowTitle: "New session",
+            snapshot: after,
+            history: [
+                PlannerStepRecord(
+                    tool: "observe",
+                    argsSummary: "",
+                    resultText: "observed",
+                    succeeded: true
+                ),
+                PlannerStepRecord(
+                    tool: "press_key",
+                    argsSummary: "key=n",
+                    resultText: "Pressed n",
+                    succeeded: true
+                ),
+            ]
+        ))
+
+        XCTAssertEqual(done.toolCalls.first?.name, "done")
+        XCTAssertEqual(
+            done.toolCalls.first?.arguments["summary"]?.stringValue,
+            "new session in Devin"
+        )
+        XCTAssertEqual(inner.calls, 0)
+    }
 }
 
 @MainActor

@@ -2,8 +2,15 @@ import Foundation
 
 @MainActor
 final class FastPathPlanner: ActionPlanner {
+    private struct Fingerprint {
+        let windowTitle: String?
+        let labels: Set<String>
+    }
+
     private let action: AppAction
     private let inner: ActionPlanner
+    private var initialFingerprint: Fingerprint?
+    private var unchangedPolls = 0
 
     init(action: AppAction, inner: ActionPlanner) {
         self.action = action
@@ -15,23 +22,51 @@ final class FastPathPlanner: ActionPlanner {
             return try await inner.next(ctx)
         }
         guard !ctx.history.isEmpty else {
-            return makeTurn(
-                DeepSeekToolCall(
-                    id: "fastpath-\(ctx.stepIndex + 1)",
-                    name: "observe",
-                    arguments: [
-                        "app": ctx.targetApp.map(JSONValue.string) ?? .null,
-                        "screenshot": .bool(false),
-                    ]
-                )
-            )
+            return observeTurn(ctx)
         }
         guard ctx.history.first?.tool == "observe",
-              ctx.history.dropFirst().allSatisfy({ $0.tool == "press_key" }) else {
+              ctx.history.dropFirst().allSatisfy({
+                  $0.tool == "press_key" || $0.tool == "observe"
+              }) else {
             return try await inner.next(ctx)
         }
-        let stepIndex = ctx.history.dropFirst().count
+        if initialFingerprint == nil, let snapshot = ctx.snapshot {
+            initialFingerprint = Fingerprint(
+                windowTitle: ctx.windowTitle,
+                labels: Set(snapshot.elements.map { "\($0.role)|\($0.label)" })
+            )
+        }
+        let pressCount = ctx.history.dropFirst().filter { $0.tool == "press_key" }.count
+        let stepIndex = pressCount
         guard stepIndex < action.steps.count else {
+            if let initialFingerprint,
+               let snapshot = ctx.snapshot {
+                let latestLabels = Set(snapshot.elements.map { "\($0.role)|\($0.label)" })
+                let titleChanged = initialFingerprint.windowTitle != ctx.windowTitle
+                let distance = Self.jaccardDistance(initialFingerprint.labels, latestLabels)
+                let elementsChanged = distance >= 0.3
+                if titleChanged || elementsChanged {
+                    let change = titleChanged ? "title" : "elements"
+                    Log.agent.info(
+                        "fastpath verified action=\(self.action.name, privacy: .public) app=\(self.action.app, privacy: .public) change=\(change, privacy: .public)"
+                    )
+                    return makeTurn(DeepSeekToolCall(
+                        id: "fastpath-\(ctx.stepIndex + 1)",
+                        name: "done",
+                        arguments: [
+                            "summary": .string("\(action.name) in \(action.app)"),
+                        ]
+                    ))
+                }
+                if unchangedPolls < 3 {
+                    unchangedPolls += 1
+                    try await Task.sleep(nanoseconds: 700_000_000)
+                    Log.agent.info(
+                        "fastpath poll n=\(self.unchangedPolls, privacy: .public)"
+                    )
+                    return observeTurn(ctx)
+                }
+            }
             return try await inner.next(ctx)
         }
         guard case .key(let key, let modifiers) = action.steps[stepIndex] else {
@@ -50,6 +85,25 @@ final class FastPathPlanner: ActionPlanner {
                 ]
             )
         )
+    }
+
+    private func observeTurn(_ ctx: PlannerContext) -> PlannerTurn {
+        makeTurn(
+            DeepSeekToolCall(
+                id: "fastpath-\(ctx.stepIndex + 1)",
+                name: "observe",
+                arguments: [
+                    "app": ctx.targetApp.map(JSONValue.string) ?? .null,
+                    "screenshot": .bool(false),
+                ]
+            )
+        )
+    }
+
+    private static func jaccardDistance(_ lhs: Set<String>, _ rhs: Set<String>) -> Double {
+        let union = lhs.union(rhs)
+        guard !union.isEmpty else { return 0 }
+        return 1 - Double(lhs.intersection(rhs).count) / Double(union.count)
     }
 
     private func makeTurn(_ call: DeepSeekToolCall) -> PlannerTurn {

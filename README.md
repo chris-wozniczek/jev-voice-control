@@ -36,7 +36,8 @@ verification. Settings › Hearing includes extra vocabulary for sites, models,
 and products; the same words are supplied to Apple Speech and Whisper. Whisper's
 language code is configurable in Settings › Hearing; leave it blank for
 automatic language detection. When Whisper is selected, its model is loaded at
-app launch so the first tap can start listening immediately.
+app launch so the first tap can start listening immediately. Whisper uses audio
+energy to detect the end of speech.
 
 ## How it works
 

@@ -6,6 +6,18 @@ import Speech
 
 @MainActor
 final class SpeechRecognizer: ObservableObject {
+    static let builtInVocabulary = [
+        "DeepSeek", "Flash", "Devin", "Claude", "Sonnet", "Opus", "Gemini",
+        "Grok", "GPT", "Fusion", "cmux", "oMLX", "Whisper",
+    ]
+
+    static func orderedVocabulary(extra: [String], appNames: [String]) -> [String] {
+        var seen = Set<String>()
+        return (extra + builtInVocabulary + appNames).filter {
+            seen.insert($0.lowercased()).inserted
+        }
+    }
+
     @Published private(set) var transcript = ""
     @Published private(set) var isRunning = false
     @Published private(set) var statusMessage: String?
@@ -48,6 +60,9 @@ final class SpeechRecognizer: ObservableObject {
         engine.onListening = { [weak self] in
             self?.engineStartedListening()
         }
+        engine.onSilence = Config.shared.listeningMode == .toggle
+            ? { [weak self] in self?.stop() }
+            : nil
         engine.onStatus = { [weak self] message in
             self?.statusMessage = message
         }

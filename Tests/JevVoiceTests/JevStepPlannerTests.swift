@@ -3,6 +3,22 @@ import XCTest
 @testable import JevVoiceCore
 
 final class JevStepPlannerTests: XCTestCase {
+    func testRerankableRequiresRealShortControl() {
+        XCTAssertFalse(
+            JevStepPlanner.isRerankable(
+                role: "AXRow",
+                label: "Wire Agnes 4/6-bit and Bonsai models to OMLX"
+            )
+        )
+        XCTAssertTrue(JevStepPlanner.isRerankable(role: "AXButton", label: "Model"))
+        XCTAssertFalse(
+            JevStepPlanner.isRerankable(
+                role: "AXButton",
+                label: "One two three four five six seven"
+            )
+        )
+    }
+
     @MainActor
     func testNilSnapshotObservesTargetApp() async throws {
         let fake = FakeJev()
@@ -457,6 +473,33 @@ final class JevStepPlannerTests: XCTestCase {
             ])
         ))
         XCTAssertEqual(turn.toolCalls.first?.name, "fail")
+    }
+
+    @MainActor
+    func testLowConfidenceNonElementChoiceDefersThenSticks() async throws {
+        let fake = FakeJev(
+            answer: .choice(
+                choice: "press_escape",
+                confidence: 0.4,
+                probabilities: ["press_escape": 0.4]
+            )
+        )
+        let planner = JevStepPlanner(client: fake, canEscalate: false)
+        let context = PlannerContext(
+            goal: "close the menu",
+            targetApp: "Devin",
+            snapshot: snapshot([
+                CuaElement(token: "tok", role: "AXButton", label: "Menu", value: nil),
+            ])
+        )
+
+        let deferred = try await planner.next(context)
+        XCTAssertEqual(deferred.toolCalls.first?.name, "observe")
+        XCTAssertEqual(deferred.toolCalls.first?.arguments["screenshot"]?.boolValue, false)
+        XCTAssertEqual(deferred.toolCalls.first?.arguments["app"]?.stringValue, "Devin")
+
+        let stuck = try await planner.next(context)
+        XCTAssertEqual(stuck.toolCalls.first?.name, "fail")
     }
 
     @MainActor
