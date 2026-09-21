@@ -37,6 +37,9 @@ public enum ClauseSplitter {
 
     private static let conjunctionPattern = #"\b(and then|and also|then|and)\b"#
     private static let dictationVerbs: Set<String> = ["type", "write", "dictate", "say", "enter"]
+    private static let loneVerbCommaWords: Set<String> = [
+        "click", "press", "tap", "hit", "select", "open", "choose",
+    ]
     private static let payloadOpenerPatterns = [
         #"\btitle(?:\s+(?:it|the note))?\s+to\b"#,
         #"\brename(?:\s+\w+){0,4}\s+to\b"#,
@@ -69,6 +72,12 @@ public enum ClauseSplitter {
         for index in 0..<ns.length {
             let character = ns.substring(with: NSRange(location: index, length: 1)).first!
             guard ",;.".contains(character) else { continue }
+            if character == ",",
+               words.filter({ $0.range.location < index }).count == 1,
+               let firstWord = words.first,
+               loneVerbCommaWords.contains(firstWord.value) {
+                continue
+            }
             let after = index + 1
             if character == ".", after < ns.length {
                 let next = ns.substring(with: NSRange(location: after, length: 1)).first!
@@ -236,6 +245,16 @@ public enum ClauseSplitter {
 
     private static func cleanPiece(_ piece: String) -> String {
         var result = piece.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let regex = try? NSRegularExpression(
+            pattern: #"^(click|press|tap|hit|select|open|choose)\s*,\s+"#,
+            options: .caseInsensitive
+        ) {
+            result = regex.stringByReplacingMatches(
+                in: result,
+                range: NSRange(location: 0, length: (result as NSString).length),
+                withTemplate: "$1 "
+            )
+        }
         let conjunctionRegex = try? NSRegularExpression(
             pattern: #"^(and then|and also|then|and)\b"#,
             options: .caseInsensitive
@@ -274,7 +293,8 @@ public enum ClauseSplitter {
     public static func split(_ transcript: String) -> [String] {
         let pattern = #"\b(and then|and also|then|and)\b"#
         guard let regex = try? NSRegularExpression(pattern: pattern, options: .caseInsensitive) else {
-            return [transcript.trimmingCharacters(in: .whitespacesAndNewlines)]
+            let whole = cleanPiece(transcript)
+            return whole.isEmpty ? [] : [whole]
         }
         let ns = transcript as NSString
         let fullRange = NSRange(location: 0, length: ns.length)
@@ -314,8 +334,12 @@ public enum ClauseSplitter {
             if !trimmed.isEmpty { parts.append(trimmed) }
             last = loc.resume
         }
-        let tail = ns.substring(from: last).trimmingCharacters(in: .whitespacesAndNewlines)
+        let tail = cleanPiece(ns.substring(from: last))
         if !tail.isEmpty { parts.append(tail) }
-        return parts.isEmpty ? [transcript.trimmingCharacters(in: .whitespacesAndNewlines)] : parts
+        if parts.isEmpty {
+            let whole = cleanPiece(transcript)
+            return whole.isEmpty ? [] : [whole]
+        }
+        return parts
     }
 }

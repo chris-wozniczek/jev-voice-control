@@ -220,6 +220,9 @@ enum AXTreeReader {
 
         while index < queue.count {
             guard Date() < deadline else {
+                guard requireInteractive || interactiveCount >= 3 else {
+                    return nil
+                }
                 return WalkResult(nodes: result, partial: true)
             }
             let node = queue[index]

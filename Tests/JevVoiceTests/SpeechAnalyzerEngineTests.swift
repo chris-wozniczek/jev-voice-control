@@ -42,6 +42,8 @@ final class SpeechAnalyzerEngineTests: XCTestCase {
         let source = try String(contentsOf: sourceURL, encoding: .utf8)
         XCTAssertTrue(source.contains("start waiting for previous finish"))
         XCTAssertTrue(source.contains("await previousFinish.value"))
+        XCTAssertTrue(source.contains("let shouldFinish = self.finishing"))
+        XCTAssertTrue(source.contains("if shouldFinish"))
     }
 #endif
 

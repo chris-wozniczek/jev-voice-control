@@ -113,6 +113,7 @@ public enum SlotExtractor {
             text = text.trimmingCharacters(in: .whitespacesAndNewlines)
         }
         let strippedLeadingTarget = stripLeadingDictationTarget(from: text)
+        var didStripLeadingTarget = strippedLeadingTarget != text
         if strippedLeadingTarget != text {
             text = strippedLeadingTarget
         }
@@ -141,8 +142,9 @@ public enum SlotExtractor {
         }
         let leadingTarget = stripLeadingDictationTarget(from: text)
         let strippedTarget = leadingTarget != text
+        didStripLeadingTarget = didStripLeadingTarget || strippedTarget
         text = leadingTarget
-        if strippedTarget,
+        if didStripLeadingTarget,
            text.range(of: #"^to\s+"#, options: [.regularExpression, .caseInsensitive]) != nil {
             text = text.replacingOccurrences(
                 of: #"^to\s+"#,
@@ -221,7 +223,7 @@ public enum SlotExtractor {
     }
 
     private static func stripLeadingDictationTarget(from text: String) -> String {
-        let pattern = #"^(?:(?:in|into|inside|in to|on)\s+)?(?:the\s+|a\s+)?(?:[\w-]+\s+){0,3}?(box|field|prompt|input|area|note|editor|bar)\s*[,:\.\-—]?\s*"#
+        let pattern = #"^(?:(?:(?:in|into|inside|in to|on)\s+)(?:the\s+|a\s+)?(?:[\w-]+\s+){0,3}?(?:box|field|prompt|input|area|note|editor|bar)|(?:the\s+|a\s+)?(?:prompt|message|text|note|input|search|chat)(?:\s+(?:box|field|area|bar))?)\s*[,:\.\-—]?\s*"#
         guard let regex = try? NSRegularExpression(pattern: pattern, options: .caseInsensitive),
               let match = regex.firstMatch(
                   in: text,

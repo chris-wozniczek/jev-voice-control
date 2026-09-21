@@ -182,7 +182,7 @@ final class JevStepPlanner: ActionPlanner {
         if textToType != nil,
            ctx.history.last?.tool == "type_text",
            ctx.history.last?.succeeded == true,
-           ctx.typedTextVisible != false {
+           ctx.typedTextVisible == true {
             return makeTurn(call: DeepSeekToolCall(
                 id: "jev-\(ctx.stepIndex + 1)",
                 name: "done",

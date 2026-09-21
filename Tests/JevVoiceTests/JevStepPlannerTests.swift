@@ -616,7 +616,7 @@ final class JevStepPlannerTests: XCTestCase {
     }
 
     @MainActor
-    func testElectronLikeSnapshotWithUnobservableValueCanReturnDone() async throws {
+    func testElectronLikeSnapshotWithUnobservableValueRequiresVerification() async throws {
         let fake = FakeJev(
             answer: .choice(choice: "done", confidence: 0.9, probabilities: ["done": 0.9]),
             goalReached: 0.9
@@ -637,7 +637,7 @@ final class JevStepPlannerTests: XCTestCase {
             ],
             stepIndex: 1
         ))
-        XCTAssertEqual(turn.toolCalls.first?.name, "done")
+        XCTAssertEqual(turn.toolCalls.first?.name, "observe")
     }
 
     @MainActor

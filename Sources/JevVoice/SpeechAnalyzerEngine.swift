@@ -69,7 +69,11 @@ final class SpeechAnalyzerEngine: SpeechEngine {
                 guard let self, self.generation == restartGeneration, !Task.isCancelled else {
                     return
                 }
+                let shouldFinish = self.finishing
                 try? self.beginStart()
+                if shouldFinish {
+                    self.finish()
+                }
             }
             return
         }
