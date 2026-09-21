@@ -277,7 +277,32 @@ enum AXTreeReader {
               ) else {
             return nil
         }
+        if shouldRewalk(
+            interactiveCount: nodes.filter({ interactiveRoles.contains($0.role) }).count,
+            frame: windowFrame
+        ) {
+            Thread.sleep(forTimeInterval: 0.25)
+            let rewalked = walk(
+                AXElementNode(element: root),
+                deadline: Date().addingTimeInterval(0.6)
+            ) ?? nodes
+            let beforeCount = nodes.filter {
+                interactiveRoles.contains($0.role)
+            }.count
+            let afterCount = rewalked.filter {
+                interactiveRoles.contains($0.role)
+            }.count
+            Log.agent.info(
+                "axtree rewalk before=\(beforeCount, privacy: .public) after=\(afterCount, privacy: .public)"
+            )
+            return snapshot(nodes: rewalked)
+        }
         return snapshot(nodes: nodes)
+    }
+
+    static func shouldRewalk(interactiveCount: Int, frame: CGRect?) -> Bool {
+        guard let frame else { return false }
+        return interactiveCount < 10 && frame.width > 400 && frame.height > 300
     }
 
     static func snapshot<N: AXNode>(

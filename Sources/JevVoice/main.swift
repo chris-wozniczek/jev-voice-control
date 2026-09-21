@@ -14,6 +14,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         installEditMenu()
         AppRegistry.shared.refresh()
         WhisperModelStore.shared.preload()
+        if #available(macOS 26, *) {
+            SpeechAnalyzerEngine.preload()
+        }
 
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         if let button = statusItem.button {

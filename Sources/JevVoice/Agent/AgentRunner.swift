@@ -501,6 +501,8 @@ final class AgentRunner: ObservableObject {
                 guard let entry = lastAXEntries[token] else {
                     throw AgentError.api("Observe the window again — that element is stale")
                 }
+                let beforeSnapshot = lastSnapshot
+                let beforeTitle = lastWindowTitle
                 do {
                     try AXTreeReader.press(entry)
                 } catch {
@@ -514,7 +516,22 @@ final class AgentRunner: ObservableObject {
                         y: frame.midY
                     ))
                 }
-                return try await afterMutation("Clicked \(entry.label)")
+                var output = try await afterMutation("Clicked \(entry.label)")
+                if let beforeFingerprint = Self.snapshotFingerprint(beforeSnapshot),
+                   let afterFingerprint = Self.snapshotFingerprint(lastSnapshot),
+                   beforeFingerprint == afterFingerprint,
+                   beforeTitle == lastWindowTitle,
+                   let frame = entry.frame,
+                   let pid = lastPID {
+                    NSRunningApplication(processIdentifier: pid_t(pid))?.activate()
+                    try await Task.sleep(for: .milliseconds(100))
+                    CGEventClicker.click(at: CGPoint(x: frame.midX, y: frame.midY))
+                    Log.agent.info(
+                        "stage=click fallback=mouse label=\(entry.label, privacy: .public)"
+                    )
+                    output = try await afterMutation("Clicked \(entry.label)")
+                }
+                return output
             }
             if token.hasPrefix("ocr:") {
                 guard let point = lastOCRPoints[token],
@@ -1029,6 +1046,14 @@ final class AgentRunner: ObservableObject {
         lastSnapshot = snapshot
         lastAXEntries = snapshot == nil ? [:] : axEntries
         lastOCRPoints = snapshot == nil ? [:] : ocrPoints
+    }
+
+    private static func snapshotFingerprint(_ snapshot: CuaSnapshot?) -> Set<String>? {
+        snapshot.map { snapshot in
+            Set(snapshot.elements.map {
+                "\($0.role)|\($0.label)|\($0.value ?? "")"
+            })
+        }
     }
 
     private static func cgRect(_ frame: [String: Double]?) -> CGRect? {

@@ -1,4 +1,5 @@
 import ApplicationServices
+import CoreGraphics
 import Foundation
 
 enum TextEntry {
@@ -48,7 +49,14 @@ enum TextEntry {
             kAXFocusedAttribute as CFString,
             kCFBooleanTrue
         ) == .success
-        return pressed || focused
+        if pressed || focused {
+            return true
+        }
+        guard let frame = frame(of: candidate.element) else {
+            return false
+        }
+        CGEventClicker.click(at: CGPoint(x: frame.midX, y: frame.midY))
+        return true
     }
 
     static func readBack(pid: pid_t, text: String) -> KeyboardFocus.ReadBack {

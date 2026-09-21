@@ -62,6 +62,7 @@ final class JevStepPlanner: ActionPlanner {
     private var recentFingerprints: [String] = []
     private var initialControlTexts: Set<String>?
     private var previousElementCount: Int?
+    private var previousSnapshot: CuaSnapshot?
 
     private let interactiveRoles: Set<String> = [
         "AXButton", "AXLink", "AXTextField", "AXTextArea", "AXMenuItem",
@@ -90,6 +91,15 @@ final class JevStepPlanner: ActionPlanner {
         }
         let previousElementCount = self.previousElementCount
         self.previousElementCount = snapshot.elements.count
+        let snapshotDiff = previousSnapshot.map {
+            SnapshotDiff.between(old: $0, new: snapshot)
+        }
+        if let lastRecord = ctx.history.last,
+           ["click", "click_at", "type_text", "press_key", "open_app"].contains(lastRecord.tool),
+           let snapshotDiff {
+            Log.agent.info("stage=verify \(snapshotDiff.compactDescription, privacy: .public)")
+        }
+        previousSnapshot = snapshot
 
         let candidates = makeCandidates(
             snapshot.elements,
@@ -136,6 +146,9 @@ final class JevStepPlanner: ActionPlanner {
             "worked_before": .array(workedBeforeDescriptions.map(JSONValue.string)),
             "text_to_type": textToType.map(JSONValue.string) ?? .null,
             "text_is_generated": .bool(ctx.generatedText != nil),
+            "recent_changes": snapshotDiff.map {
+                .string($0.compactDescription)
+            } ?? .null,
             "elements": .array(candidates.map { candidate in
                 .object([
                     "id": .string(candidate.id),
@@ -171,13 +184,16 @@ final class JevStepPlanner: ActionPlanner {
         criteria["scroll_down"] = "Scroll to reveal more controls"
         criteria["done"] = "The goal is already complete"
         criteria["stuck"] = "No listed element can advance the goal"
+        let recentChanges = snapshotDiff.map {
+            "Recently changed: +\($0.added.sorted().joined(separator: ",")) -\($0.removed.sorted().joined(separator: ",")). "
+        } ?? ""
         let instructions = """
-        The user said `\(ctx.goal)`. `elements` lists the controls currently visible in `\(ctx.targetApp ?? "the app")`; `previous_actions` are the steps already taken. \(ctx.siteHost.map { "The requested site is \($0). " } ?? "")Pick the single next action that moves the goal forward now. Pick `done` only if `elements` and `window_title` already show that the goal is completed. Pick `stuck` if no listed element can advance the goal.
+        The user said `\(ctx.goal)`. `elements` lists the controls currently visible in `\(ctx.targetApp ?? "the app")`; `previous_actions` are the steps already taken. \(recentChanges)\(ctx.siteHost.map { "The requested site is \($0). " } ?? "")Pick the single next action that moves the goal forward now. Pick `done` only if `elements` and `window_title` already show that the goal is completed. Pick `stuck` if no listed element can advance the goal.
         """
         let questions: [String: Question] = [
             "next_action": .choice(instructions: instructions, criteria: criteria),
             "goal_reached": .noul(
-                instructions: "Do `elements` and `window_title` show that `\(ctx.goal)` has already been fully completed?"
+                instructions: "\(recentChanges)Do `elements` and `window_title` show that `\(ctx.goal)` has already been fully completed?"
             ),
             "wrong_surface": .noul(
                 instructions: "Did the last action open a window or dialog (`window_title`) that is unrelated to `\(ctx.goal)` and should be closed to get back? `previous_window_title` is where we were before."
