@@ -327,6 +327,7 @@ final class WhisperSpeechEngine: SpeechEngine {
     private var finishing = false
     private var generation = 0
     private var finishTask: Task<Void, Never>?
+    private var didLogZeroConversion = false
 
     init(store: WhisperModelStore? = nil) {
         self.store = store ?? .shared
@@ -341,6 +342,7 @@ final class WhisperSpeechEngine: SpeechEngine {
         }
         finishing = false
         samples = []
+        didLogZeroConversion = false
         generation += 1
         let currentGeneration = generation
         Log.speech.info("Whisper model loading name=\(self.store.selected.id, privacy: .public)")
@@ -445,17 +447,30 @@ final class WhisperSpeechEngine: SpeechEngine {
         ), let converter = AVAudioConverter(from: inputFormat, to: outputFormat) else {
             throw SpeechEngineError.message("Unable to prepare microphone audio")
         }
+        converter.primeMethod = .none
         self.converter = converter
         inputNode.installTap(onBus: 0, bufferSize: 1024, format: inputFormat) { [weak self] buffer, _ in
             let floats = Self.convert(buffer, with: converter, to: outputFormat)
-            guard !floats.isEmpty else { return }
+            if floats.isEmpty {
+                let inputFrames = buffer.frameLength
+                if inputFrames > 0 {
+                    Task { @MainActor [weak self] in
+                        guard let self, !self.didLogZeroConversion else { return }
+                        self.didLogZeroConversion = true
+                        Log.speech.info(
+                            "whisper convert produced 0 frames in=\(inputFrames, privacy: .public)"
+                        )
+                    }
+                }
+                return
+            }
             Task { @MainActor in self?.append(floats) }
         }
         audioEngine.prepare()
         try audioEngine.start()
     }
 
-    private nonisolated static func convert(
+    nonisolated static func convert(
         _ buffer: AVAudioPCMBuffer, with converter: AVAudioConverter, to outputFormat: AVAudioFormat
     ) -> [Float] {
         let capacity = AVAudioFrameCount(
@@ -468,7 +483,7 @@ final class WhisperSpeechEngine: SpeechEngine {
         var conversionError: NSError?
         converter.convert(to: converted, error: &conversionError) { _, status in
             if consumed {
-                status.pointee = .endOfStream
+                status.pointee = .noDataNow
                 return nil
             }
             consumed = true

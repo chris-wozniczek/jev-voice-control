@@ -1,5 +1,5 @@
 cask "jev-voice" do
-  version "0.6.1"
+  version "0.6.2"
   sha256 "a146be4eaa4d45c663fe386965afa9d7e1e59f46a71b1b622eacb854d50786a2"
 
   url "https://github.com/chris-wozniczek/jev-voice-control/releases/download/v#{version}/Jev-Voice-#{version}.zip"
