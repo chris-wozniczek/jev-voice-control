@@ -1,7 +1,9 @@
 import AppKit
 import Combine
 import Foundation
+import ImageIO
 import JevVoiceCore
+import UniformTypeIdentifiers
 
 enum AgentStepResult: Equatable {
     case ok(String)
@@ -53,6 +55,9 @@ final class AgentRunner: ObservableObject {
     private var idleShutdownTask: Task<Void, Never>?
     private var plannerSeconds = 0.0
     private var cuaSeconds = 0.0
+    private var forcedOCRUsed = false
+    private var forceOCRRequested = false
+    private var lastScreenshotScale: CGFloat = 1
 
     var hintStore: HintStore = .shared
     var appsProvider: (() async throws -> [CuaApp])?
@@ -111,6 +116,9 @@ final class AgentRunner: ObservableObject {
         lastApp = nil
         plannerSeconds = 0
         cuaSeconds = 0
+        forcedOCRUsed = false
+        forceOCRRequested = false
+        lastScreenshotScale = 1
         let runStarted = Date()
         targetApp = context.frontmostApp
         currentGoal = goal
@@ -153,6 +161,26 @@ final class AgentRunner: ObservableObject {
             Log.agent.info(
                 "fastpath matched action=\(action.name, privacy: .public) app=\(action.app, privacy: .public)"
             )
+        }
+        if SubmitIntent.matches(goal: goal) {
+            do {
+                if let submitOutcome = try await trySubmitFastPath(goal: goal) {
+                    switch submitOutcome {
+                    case .done:
+                        outcomeDescription = "done"
+                    case .failed:
+                        outcomeDescription = "failed"
+                    case .cancelled:
+                        outcomeDescription = "cancelled"
+                    }
+                    return submitOutcome
+                }
+            } catch AgentError.api(let message) where message.hasPrefix("user declined") {
+                outcomeDescription = "failed"
+                return .failed(message)
+            } catch {
+                Log.agent.info("submit fast path unavailable error=\(error.localizedDescription, privacy: .public)")
+            }
         }
         var successfulHints: [(app: String, role: String, label: String)] = []
         let frontmost = context.frontmostApp
@@ -351,6 +379,19 @@ final class AgentRunner: ObservableObject {
         } catch AgentError.cancelled {
             outcomeDescription = "cancelled"
             return .cancelled
+        } catch AgentError.budget {
+            if let stats = effectivePlanner.fallbackStats {
+                let elapsed = stats.elapsed ?? 0
+                Log.agent.info(
+                    "outcome=failed reason=budget fallbackSteps=\(stats.steps) fallbackElapsed=\(elapsed)"
+                )
+                outcomeDescription = "failed"
+                return .failed(
+                    "I couldn't find a control for \(goal) in \(targetApp ?? "the app")"
+                )
+            }
+            outcomeDescription = "failed"
+            return .failed(AgentError.budget.localizedDescription)
         } catch {
             outcomeDescription = "failed"
             return .failed(error.localizedDescription)
@@ -571,8 +612,18 @@ final class AgentRunner: ObservableObject {
                 )
             }
             try await confirmIfRisky(tool: "click_at", token: nil, key: nil)
+            let point = ScreenshotScale.originalPoint(
+                x: x,
+                y: y,
+                scale: lastScreenshotScale
+            )
             let result = try await measureCua {
-                try await CuaDriver.shared.click(pid: pid, windowId: window, x: x, y: y)
+                try await CuaDriver.shared.click(
+                    pid: pid,
+                    windowId: window,
+                    x: point.x,
+                    y: point.y
+                )
             }
             return try await afterMutation(result.text ?? "Clicked")
         case "type_text":
@@ -705,6 +756,9 @@ final class AgentRunner: ObservableObject {
     }
 
     private func observe(_ arguments: [String: JSONValue]) async throws -> ToolOutput {
+        if arguments["force_ocr"]?.boolValue == true {
+            forceOCRRequested = true
+        }
         var runningApps = try await apps()
         let explicit = arguments["app"]?.stringValue
         if let explicit, !explicit.isEmpty {
@@ -968,8 +1022,13 @@ final class AgentRunner: ObservableObject {
         let interactiveCount = mergedSnapshot.elements.filter {
             AXTreeReader.interactiveRoles.contains($0.role)
         }.count
+        let forcedOCR = forceOCRRequested && !forcedOCRUsed
+        forceOCRRequested = false
+        if forcedOCR {
+            forcedOCRUsed = true
+        }
         if Config.shared.ocrFallbackEnabled,
-           interactiveCount < 3,
+           (interactiveCount < 3 || forcedOCR),
            Permission.screenRecording.isGranted,
            let frame = lastWindowFrame ?? Self.cgRect(window.frame) {
             let ocrStarted = Date()
@@ -977,7 +1036,7 @@ final class AgentRunner: ObservableObject {
                 OCRReader.scan(windowFrame: frame)
             }.value ?? []
             Log.agent.info(
-                "stage=ocr labels=\(hits.count) elapsed=\(Date().timeIntervalSince(ocrStarted))"
+                "stage=ocr labels=\(hits.count) elapsed=\(Date().timeIntervalSince(ocrStarted)) forced=\(forcedOCR)"
             )
             if !hits.isEmpty {
                 let lines = hits.map { hit in
@@ -1257,7 +1316,9 @@ final class AgentRunner: ObservableObject {
     private func confirmIfRisky(tool: String, token: String?, key: String?) async throws {
         guard isRisky(token: token, key: key) else { return }
         let reason = "This \(tool) may be destructive"
-        steps[steps.count - 1].result = .pendingConfirm
+        if !steps.isEmpty {
+            steps[steps.count - 1].result = .pendingConfirm
+        }
         pendingConfirmation = true
         let allowed = await requestConfirmation(reason)
         pendingConfirmation = false
@@ -1267,11 +1328,16 @@ final class AgentRunner: ObservableObject {
     }
 
     func isRisky(token: String?, key: String?) -> Bool {
-        let label = token.flatMap { lastSnapshot?.element(token: $0)?.label }?.lowercased() ?? ""
-        if AgentRisk.matchesDestructiveWord(label) { return true }
+        let labels = token.flatMap { lastSnapshot?.element(token: $0)?.label }
+            .map { [$0] }
+            ?? (lastSnapshot?.elements.map(\.label) ?? [])
+        if labels.contains(where: { AgentRisk.matchesDestructiveWord($0.lowercased()) }) {
+            return true
+        }
         guard let key = key?.lowercased(), key == "return" || key == "enter" else { return false }
-        let latestLabel = (lastSnapshot?.elements.last?.label ?? "").lowercased()
-        return AgentRisk.matchesDestructiveWord(latestLabel)
+            return labels.contains {
+                AgentRisk.matchesDestructiveWord($0.lowercased())
+            }
     }
 
     private func number(_ value: JSONValue?) -> Double? {
@@ -1289,19 +1355,115 @@ final class AgentRunner: ObservableObject {
 
     private func toolMessage(id: String, content: String, image: Data?) -> DeepSeekMessage {
         var value: JSONValue = .string(content)
-        if let image {
+        if let image = image.flatMap(prepareScreenshot) {
             value = .array([
                 .object(["type": .string("text"), "text": .string(content)]),
                 .object([
                     "type": .string("image_url"),
                     "image_url": .object([
-                        "url": .string("data:image/png;base64,\(image.base64EncodedString())"),
+                        "url": .string("data:image/jpeg;base64,\(image.base64EncodedString())"),
                         "detail": .string("low"),
                     ]),
                 ]),
             ])
         }
         return DeepSeekMessage(role: "tool", content: value, name: nil, toolCallID: id, toolCalls: nil)
+    }
+
+    private func prepareScreenshot(_ data: Data) -> Data? {
+        guard let source = CGImageSourceCreateWithData(data as CFData, nil),
+              let image = CGImageSourceCreateImageAtIndex(source, 0, nil) else {
+            return data
+        }
+        let width = CGFloat(image.width)
+        let height = CGFloat(image.height)
+        let factor = ScreenshotScale.factor(width: width, height: height)
+        lastScreenshotScale = factor
+        let size = ScreenshotScale.scaledSize(width: width, height: height)
+        let outputImage: CGImage
+        if factor == 1 {
+            outputImage = image
+        } else {
+            guard let context = CGContext(
+                data: nil,
+                width: Int(size.width.rounded()),
+                height: Int(size.height.rounded()),
+                bitsPerComponent: 8,
+                bytesPerRow: 0,
+                space: CGColorSpaceCreateDeviceRGB(),
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+            ) else { return data }
+            context.interpolationQuality = .high
+            context.draw(image, in: CGRect(origin: .zero, size: size))
+            guard let scaled = context.makeImage() else { return data }
+            outputImage = scaled
+        }
+        let jpeg = NSMutableData()
+        guard let destination = CGImageDestinationCreateWithData(
+            jpeg,
+            UTType.jpeg.identifier as CFString,
+            1,
+            nil
+        ) else { return data }
+        CGImageDestinationAddImage(
+            destination,
+            outputImage,
+            [kCGImageDestinationLossyCompressionQuality: 0.7] as CFDictionary
+        )
+        guard CGImageDestinationFinalize(destination) else { return data }
+        return jpeg as Data
+    }
+
+    private func trySubmitFastPath(goal: String) async throws -> AgentOutcome? {
+        if lastSnapshot == nil {
+            _ = try await observe([
+                "app": targetApp.map(JSONValue.string) ?? .null,
+                "screenshot": .bool(false),
+            ])
+        }
+        guard let pid = lastPID,
+              TextEntry.focusedTextInput(pid: pid_t(pid)) != nil,
+              let value = TextEntry.focusedTextInputValue(pid: pid_t(pid)),
+              !value.isEmpty else {
+            return nil
+        }
+        guard let window = lastWindowID else { return nil }
+        let before = lastSnapshot
+        for attempt in SubmitFastPath.attempts {
+            let logKey = attempt.logKey
+            let key = attempt.key
+            let modifiers = attempt.modifiers
+            try await confirmIfRisky(tool: "submitKey", token: nil, key: key)
+            guard await KeyboardFocus.bringToFront(pid: pid_t(pid)) else { return nil }
+            _ = try await measureCua {
+                try await CuaDriver.shared.pressKey(
+                    pid: pid,
+                    key: key,
+                    modifiers: modifiers,
+                    windowId: window
+                )
+            }
+            try await Task.sleep(for: .milliseconds(300))
+            _ = try await observe([:])
+            let changed = if let before, let after = lastSnapshot {
+                !SnapshotDiff.between(old: before, new: after).isEmpty
+            } else {
+                false
+            }
+            let currentValue = TextEntry.focusedTextInputValue(pid: pid_t(pid))
+            let fieldEmptied = currentValue?.isEmpty == true
+            let elementGone = TextEntry.focusedTextInput(pid: pid_t(pid)) == nil
+            Log.agent.info(
+                "stage=submit key=\(logKey, privacy: .public) changed=\(changed) fieldEmptied=\(fieldEmptied)"
+            )
+            if changed || fieldEmptied || elementGone {
+                Log.agent.info(
+                    "outcome=done via=submitKey key=\(logKey, privacy: .public)"
+                )
+                return .done("Sent.")
+            }
+        }
+        return nil
     }
 }
 

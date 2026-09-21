@@ -63,6 +63,7 @@ final class JevStepPlanner: ActionPlanner {
     private var initialControlTexts: Set<String>?
     private var previousElementCount: Int?
     private var previousSnapshot: CuaSnapshot?
+    private var forcedOCRRequested = false
 
     private let interactiveRoles: Set<String> = [
         "AXButton", "AXLink", "AXTextField", "AXTextArea", "AXMenuItem",
@@ -437,6 +438,41 @@ final class JevStepPlanner: ActionPlanner {
             )
         }
         if selectedChoice == "stuck" {
+            let hasOCR = snapshot.elements.contains { $0.token.hasPrefix("ocr:") }
+            if canEscalate, !hasOCR, !forcedOCRRequested {
+                forcedOCRRequested = true
+                return PlannerTurn(
+                    assistant: DeepSeekMessage(
+                        role: "assistant",
+                        content: nil,
+                        name: nil,
+                        toolCallID: nil,
+                        toolCalls: [
+                            DeepSeekToolCall(
+                                id: "jev-\(ctx.stepIndex + 1)",
+                                name: "observe",
+                                arguments: [
+                                    "app": ctx.targetApp.map(JSONValue.string) ?? .null,
+                                    "screenshot": .bool(false),
+                                    "force_ocr": .bool(true),
+                                ]
+                            ),
+                        ]
+                    ),
+                    toolCalls: [
+                        DeepSeekToolCall(
+                            id: "jev-\(ctx.stepIndex + 1)",
+                            name: "observe",
+                            arguments: [
+                                "app": ctx.targetApp.map(JSONValue.string) ?? .null,
+                                "screenshot": .bool(false),
+                                "force_ocr": .bool(true),
+                            ]
+                        ),
+                    ],
+                    forceOCR: true
+                )
+            }
             if canEscalate { return escalation("Jev could not find a control to advance the goal") }
             return makeFailure(
                 "I couldn't find a way to \(ctx.goal) in \(ctx.targetApp ?? "the app")",

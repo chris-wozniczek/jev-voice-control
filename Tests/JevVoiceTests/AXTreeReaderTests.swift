@@ -49,6 +49,14 @@ final class AXTreeReaderTests: XCTestCase {
             interactiveCount: 9,
             frame: CGRect(x: 0, y: 0, width: 400, height: 301)
         ))
+        XCTAssertTrue(AXTreeReader.shouldRewalk(
+            interactiveCount: 12,
+            frame: CGRect(x: 0, y: 0, width: 1800, height: 1100)
+        ))
+        XCTAssertFalse(AXTreeReader.shouldRewalk(
+            interactiveCount: 13,
+            frame: CGRect(x: 0, y: 0, width: 1800, height: 1100)
+        ))
     }
 
     func testInteractiveAndLabelledNodesAreEmitted() throws {

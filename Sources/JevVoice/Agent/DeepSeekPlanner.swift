@@ -77,6 +77,7 @@ struct PlannerTurn {
     let assistant: DeepSeekMessage
     let toolCalls: [DeepSeekToolCall]
     var escalation: PlannerEscalation = .none
+    var forceOCR: Bool = false
 }
 
 struct DeepSeekToolCall {
@@ -301,11 +302,23 @@ protocol ActionPlanner {
     func next(_ ctx: PlannerContext) async throws -> PlannerTurn
 }
 
+struct FallbackStats: Equatable {
+    let usingDeepSeek: Bool
+    let steps: Int
+    let elapsed: TimeInterval?
+}
+
+extension ActionPlanner {
+    var fallbackStats: FallbackStats? { nil }
+}
+
 @MainActor
 final class CascadePlanner: ActionPlanner {
     private let jev: ActionPlanner
     private let deepSeek: ActionPlanner?
     private var usingDeepSeek = false
+    private var fallbackStartedAt: Date?
+    private var fallbackSteps = 0
 
     init(jev: ActionPlanner, deepSeek: ActionPlanner?) {
         self.jev = jev
@@ -318,19 +331,46 @@ final class CascadePlanner: ActionPlanner {
                 assertionFailure("Jev escalation requires a DeepSeek planner")
                 throw AgentError.api("DeepSeek fallback is unavailable")
             }
-            return try await deepSeek.next(ctx)
+            guard fallbackSteps < Config.shared.fallbackMaxSteps,
+                  let started = fallbackStartedAt,
+                  Date().timeIntervalSince(started) < Config.shared.fallbackMaxSeconds else {
+                throw AgentError.budget
+            }
+            let turn = try await deepSeek.next(ctx)
+            fallbackSteps += 1
+            guard fallbackSteps <= Config.shared.fallbackMaxSteps,
+                  Date().timeIntervalSince(started) < Config.shared.fallbackMaxSeconds else {
+                throw AgentError.budget
+            }
+            return turn
         }
         let turn = try await jev.next(ctx)
         if case .toDeepSeek(let reason) = turn.escalation {
             Log.agent.info("escalate to deepseek reason=\(reason, privacy: .public)")
             usingDeepSeek = true
+            fallbackStartedAt = Date()
+            fallbackSteps = 0
             guard let deepSeek else {
                 assertionFailure("Jev escalation requires a DeepSeek planner")
                 throw AgentError.api("DeepSeek fallback is unavailable")
             }
-            return try await deepSeek.next(ctx)
+            guard fallbackSteps < Config.shared.fallbackMaxSteps else {
+                throw AgentError.budget
+            }
+            let turn = try await deepSeek.next(ctx)
+            fallbackSteps += 1
+            return turn
         }
         return turn
+    }
+
+    var fallbackStats: FallbackStats? {
+        guard usingDeepSeek else { return nil }
+        return FallbackStats(
+            usingDeepSeek: true,
+            steps: fallbackSteps,
+            elapsed: fallbackStartedAt.map { Date().timeIntervalSince($0) }
+        )
     }
 }
 
