@@ -279,13 +279,23 @@ struct ContentView: View {
             HStack(spacing: 10) {
                 Image(systemName: "questionmark.circle.fill")
                     .foregroundStyle(.yellow)
-                Text(controller.awaitingVoiceAnswer ? "Say “yes” or “no”" : "Run these steps?")
-                    .font(.callout)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(controller.confirmationQuestion.isEmpty
+                        ? "Run these steps?"
+                        : controller.confirmationQuestion)
+                        .font(.callout)
+                    if controller.awaitingVoiceAnswer {
+                        Text("Hold Option-Space to answer")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .font(.callout)
                 Spacer()
-                Button("Dismiss") { controller.dismiss() }
+                Button("No") { controller.dismiss() }
                     .controlSize(.small)
                     .keyboardShortcut(.cancelAction)
-                Button("Run") { Task { await controller.confirmAndExecute() } }
+                Button("Yes") { Task { await controller.confirmAndExecute() } }
                     .buttonStyle(.borderedProminent)
                     .controlSize(.small)
                     .keyboardShortcut(.defaultAction)

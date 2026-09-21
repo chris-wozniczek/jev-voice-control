@@ -20,6 +20,7 @@ final class VoiceController: ObservableObject {
     @Published var missingPermissions: [Permission] = Permission.missing
     @Published var hotKeyRegistered = true
     @Published var awaitingVoiceAnswer = false
+    @Published var confirmationQuestion = ""
     @Published var speechStatusMessage: String?
     @Published var suggestions: [String] = []
     @Published var suggestionClause = ""
@@ -106,8 +107,11 @@ final class VoiceController: ObservableObject {
             guard let self else { return }
             self.status = .awaitingConfirm
             self.awaitingVoiceAnswer = true
-            await self.speakIfEnabled("\(reason). Yes or no?")
-            self.startListening()
+            self.confirmationQuestion = "\(reason). Yes or no?"
+            await self.speakIfEnabled(self.confirmationQuestion)
+            if self.config.listeningMode != .hold {
+                self.startListening()
+            }
         }
     }
 
@@ -279,7 +283,16 @@ final class VoiceController: ObservableObject {
             transcript: text
         )
         Log.command.info("verdict=\(String(describing: verdict), privacy: .public)")
-        let policyVerdict = config.safetyPolicy?.verdict(for: text)
+        let browserNames = [
+            "Safari", "Google Chrome", "Chrome", "Arc", "Brave", "Firefox", "Edge",
+        ]
+        let inBrowser = decisions.contains { decision in
+            decision.siteHost != nil || browserNames.contains { browserName in
+                guard let app = decision.targetApp else { return false }
+                return app.localizedCaseInsensitiveCompare(browserName) == .orderedSame
+            }
+        }
+        let policyVerdict = config.safetyPolicy?.verdict(for: text, inBrowser: inBrowser)
         var routesToAgent = shouldUseComputerAgent(
             transcript: text, decisions: decisions, verdict: verdict, error: interpretationError
         )
@@ -503,21 +516,30 @@ final class VoiceController: ObservableObject {
         let question = summaries.isEmpty
             ? "\(reason). Yes or no?"
             : "\(reason). \(summaries). Yes or no?"
+        confirmationQuestion = question
         await speakIfEnabled(question)
         guard awaitingVoiceAnswer else { return }
         confirmationTimeoutTask?.cancel()
+        let timeout: UInt64 = config.listeningMode == .hold
+            ? 15_000_000_000
+            : 8_000_000_000
         confirmationTimeoutTask = Task { @MainActor [weak self] in
-            try? await Task.sleep(nanoseconds: 8_000_000_000)
+            try? await Task.sleep(nanoseconds: timeout)
             guard let self, self.awaitingVoiceAnswer else { return }
             self.dismissConfirmation()
         }
-        startListening()
+        if config.listeningMode != .hold {
+            startListening()
+        }
     }
 
     private func handleConfirmAnswer(_ text: String) async {
         confirmationTimeoutTask?.cancel()
         let answer = text.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
-        if matches(answer, pattern: #"^(yes|yeah|yep|yup|do it|go|run|ok|okay|confirm|sure)\b"#) {
+        if matches(
+            answer,
+            pattern: #"^(yes|yeah|yep|yup|do it|go ahead|go|run|ok|okay|confirm|sure)(?:\s+please|\s+send it)?\b"#
+        ) {
             await confirmAndExecute()
         } else if matches(
             answer,
@@ -538,6 +560,7 @@ final class VoiceController: ObservableObject {
     func confirmAndExecute() async {
         confirmationTimeoutTask?.cancel()
         awaitingVoiceAnswer = false
+        confirmationQuestion = ""
         recognizer.stop()
         if let pendingConfirmedRun {
             self.pendingConfirmedRun = nil
@@ -558,6 +581,7 @@ final class VoiceController: ObservableObject {
         confirmationTimeoutTask?.cancel()
         confirmationTimeoutTask = nil
         awaitingVoiceAnswer = false
+        confirmationQuestion = ""
         preConfirmedExecution = false
         pendingConfirmedRun = nil
         recognizer.stop()

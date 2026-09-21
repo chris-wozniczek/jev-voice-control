@@ -8,6 +8,7 @@ enum Permission: String, CaseIterable, Identifiable {
     case speechRecognition = "Speech Recognition"
     case accessibility = "Accessibility"
     case screenRecording = "Screen Recording"
+    case automation = "Automation"
 
     var id: String { rawValue }
 
@@ -17,6 +18,7 @@ enum Permission: String, CaseIterable, Identifiable {
         case .speechRecognition: return "transcribe them"
         case .accessibility: return "type dictated text"
         case .screenRecording: return "capture screenshots for computer use"
+        case .automation: return "control System Events for system shortcuts"
         }
     }
 
@@ -26,6 +28,7 @@ enum Permission: String, CaseIterable, Identifiable {
         case .speechRecognition: return "Privacy_SpeechRecognition"
         case .accessibility: return "Privacy_Accessibility"
         case .screenRecording: return "Privacy_ScreenCapture"
+        case .automation: return "Privacy_Automation"
         }
     }
 
@@ -42,6 +45,8 @@ enum Permission: String, CaseIterable, Identifiable {
             return AXIsProcessTrusted()
         case .screenRecording:
             return CGPreflightScreenCaptureAccess()
+        case .automation:
+            return false
         }
     }
 
@@ -59,11 +64,13 @@ enum Permission: String, CaseIterable, Identifiable {
             return true
         case .screenRecording:
             return false
+        case .automation:
+            return false
         }
     }
 
     static var missing: [Permission] {
-        allCases.filter { $0 != .screenRecording && !$0.isGranted }
+        allCases.filter { $0 != .screenRecording && $0 != .automation && !$0.isGranted }
     }
 
     /// Triggers the system prompt where one is still available, otherwise opens System Settings.
@@ -90,11 +97,19 @@ enum Permission: String, CaseIterable, Identifiable {
             _ = AXIsProcessTrustedWithOptions(options)
         case .screenRecording:
             _ = CGRequestScreenCaptureAccess()
+        case .automation:
+            openSystemSettings()
         }
     }
 
     func openSystemSettings() {
+        if self == .automation {
+            guard !Self.automationSettingsOpened else { return }
+            Self.automationSettingsOpened = true
+        }
         let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?\(settingsAnchor)")!
         NSWorkspace.shared.open(url)
     }
+
+    private static var automationSettingsOpened = false
 }

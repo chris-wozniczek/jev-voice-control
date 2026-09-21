@@ -1,6 +1,11 @@
 import Foundation
 
 public struct SafetyPolicy: Decodable {
+    private enum CodingKeys: String, CodingKey {
+        case blocked
+        case confirm
+        case confirmInBrowser
+    }
     public enum Verdict: Equatable {
         case reject(reason: String)
         case confirm(reason: String)
@@ -19,17 +24,29 @@ public struct SafetyPolicy: Decodable {
 
     public let blocked: [BlockedRule]
     public let confirm: [String]
+    public let confirmInBrowser: [String]
 
-    public init(blocked: [BlockedRule], confirm: [String]) {
+    public init(blocked: [BlockedRule], confirm: [String], confirmInBrowser: [String] = []) {
         self.blocked = blocked
         self.confirm = confirm
+        self.confirmInBrowser = confirmInBrowser
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        blocked = try container.decode([BlockedRule].self, forKey: .blocked)
+        confirm = try container.decode([String].self, forKey: .confirm)
+        confirmInBrowser = try container.decodeIfPresent(
+            [String].self,
+            forKey: .confirmInBrowser
+        ) ?? []
     }
 
     public static func load(from data: Data) throws -> SafetyPolicy {
         try JSONDecoder().decode(SafetyPolicy.self, from: data)
     }
 
-    public func verdict(for transcript: String) -> Verdict? {
+    public func verdict(for transcript: String, inBrowser: Bool = false) -> Verdict? {
         for rule in blocked {
             guard let regex = try? NSRegularExpression(
                     pattern: rule.pattern,
@@ -43,7 +60,8 @@ public struct SafetyPolicy: Decodable {
             }
             return .reject(reason: rule.reason)
         }
-        for word in confirm {
+        let words = confirm + (inBrowser ? confirmInBrowser : [])
+        for word in words {
             let escaped = NSRegularExpression.escapedPattern(for: word)
             guard let regex = try? NSRegularExpression(
                     pattern: "\\b\(escaped)\\b",
