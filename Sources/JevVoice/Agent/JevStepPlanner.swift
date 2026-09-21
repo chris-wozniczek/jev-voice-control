@@ -26,6 +26,14 @@ extension JevClient: JevAnswering {
 
 @MainActor
 final class JevStepPlanner: ActionPlanner {
+    nonisolated static func isRerankable(role: String, label: String) -> Bool {
+        [
+            "AXButton", "AXPopUpButton", "AXMenuItem", "AXTab", "AXCheckBox",
+            "AXRadioButton", "AXComboBox", "AXMenuButton",
+        ].contains(role)
+            && label.split(whereSeparator: { $0.isWhitespace }).count <= 5
+    }
+
     private struct Candidate {
         let id: String
         let element: CuaElement
@@ -283,7 +291,10 @@ final class JevStepPlanner: ActionPlanner {
            !chosen.elementRoleIsText,
            confidence < 0.6,
            let reranked = candidates
-            .filter({ $0.overlap > 0 })
+            .filter({
+                $0.overlap > 0
+                    && Self.isRerankable(role: $0.element.role, label: $0.element.label)
+            })
             .max(by: {
                 (probabilities[$0.id] ?? 0) < (probabilities[$1.id] ?? 0)
             }) {
@@ -295,6 +306,29 @@ final class JevStepPlanner: ActionPlanner {
         let selectedCandidate = candidates.first { $0.id == selectedChoice }
         let selectedToken = selectedCandidate?.element.token
         let actionKey = "\(selectedChoice)|\(selectedToken ?? "")"
+        if ["press_escape", "press_return", "scroll_down"].contains(selectedChoice),
+           confidence < 0.5 {
+            if actionKey == previousActionKey, fingerprint == previousFingerprint {
+                return stuckTurn(
+                    reason: "The same low-confidence choice repeated",
+                    step: ctx.stepIndex + 1
+                )
+            }
+            previousActionKey = actionKey
+            previousFingerprint = fingerprint
+            try await Task.sleep(nanoseconds: 700_000_000)
+            Log.agent.info(
+                "jev step defer choice=\(selectedChoice, privacy: .public) confidence=\(confidence)"
+            )
+            return makeTurn(call: DeepSeekToolCall(
+                id: "jev-\(ctx.stepIndex + 1)",
+                name: "observe",
+                arguments: [
+                    "app": ctx.targetApp.map(JSONValue.string) ?? .null,
+                    "screenshot": .bool(false),
+                ]
+            ))
+        }
         if actionKey == previousActionKey, fingerprint == previousFingerprint {
             return stuckTurn(
                 reason: "The same control did not change the screen",

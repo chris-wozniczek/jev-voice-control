@@ -1,6 +1,7 @@
 @preconcurrency import AVFoundation
 import Combine
 import Foundation
+import JevVoiceCore
 import Speech
 import WhisperKit
 
@@ -10,6 +11,7 @@ protocol SpeechEngine: AnyObject {
     var onFinal: ((String) -> Void)? { get set }
     var onError: ((Error) -> Void)? { get set }
     var onListening: (() -> Void)? { get set }
+    var onSilence: (() -> Void)? { get set }
     var onStatus: ((String?) -> Void)? { get set }
     var vocabulary: [String] { get set }
     func start() throws
@@ -223,6 +225,7 @@ final class AppleSpeechEngine: NSObject, SpeechEngine {
     var onFinal: ((String) -> Void)?
     var onError: ((Error) -> Void)?
     var onListening: (() -> Void)?
+    var onSilence: (() -> Void)?
     var onStatus: ((String?) -> Void)?
     var vocabulary: [String] = []
 
@@ -312,6 +315,7 @@ final class WhisperSpeechEngine: SpeechEngine {
     var onFinal: ((String) -> Void)?
     var onError: ((Error) -> Void)?
     var onListening: (() -> Void)?
+    var onSilence: (() -> Void)?
     var onStatus: ((String?) -> Void)?
     var vocabulary: [String] = []
 
@@ -328,6 +332,16 @@ final class WhisperSpeechEngine: SpeechEngine {
     private var generation = 0
     private var finishTask: Task<Void, Never>?
     private var didLogZeroConversion = false
+    private var silenceTask: Task<Void, Never>?
+    private var noiseFloor: Double?
+    private var noiseFloorSampleCount = 0
+    private var voicedSamples = 0
+    private var speechStarted = false
+    private var lastVoicedAt = Date()
+    private var samplesAtLastVoice = 0
+    private var samplesAtLastPass = 0
+    private var lastPassText = ""
+    private var didSignalSilence = false
 
     init(store: WhisperModelStore? = nil) {
         self.store = store ?? .shared
@@ -343,6 +357,17 @@ final class WhisperSpeechEngine: SpeechEngine {
         finishing = false
         samples = []
         didLogZeroConversion = false
+        silenceTask?.cancel()
+        silenceTask = nil
+        noiseFloor = nil
+        noiseFloorSampleCount = 0
+        voicedSamples = 0
+        speechStarted = false
+        lastVoicedAt = Date()
+        samplesAtLastVoice = 0
+        samplesAtLastPass = 0
+        lastPassText = ""
+        didSignalSilence = false
         generation += 1
         let currentGeneration = generation
         Log.speech.info("Whisper model loading name=\(self.store.selected.id, privacy: .public)")
@@ -354,7 +379,9 @@ final class WhisperSpeechEngine: SpeechEngine {
                 let kit = try await self.store.loadKit(at: modelPath)
                 guard !Task.isCancelled, self.generation == currentGeneration else { return }
                 self.whisperKit = kit
-                Log.speech.info("Whisper model ready name=\(self.store.selected.id, privacy: .public)")
+                Log.speech.info(
+                    "Whisper model ready name=\(self.store.selected.id, privacy: .public) audioEncoderCompute=\(kit.modelCompute.audioEncoderCompute.description, privacy: .public) textDecoderCompute=\(kit.modelCompute.textDecoderCompute.description, privacy: .public)"
+                )
                 self.onStatus?(nil)
                 self.loadTask = nil
                 if self.finishing {
@@ -368,6 +395,18 @@ final class WhisperSpeechEngine: SpeechEngine {
                             try? await Task.sleep(nanoseconds: 800_000_000)
                             guard !Task.isCancelled else { return }
                             await self?.transcribeLatest(isFinal: false)
+                        }
+                    }
+                    self.silenceTask = Task { [weak self] in
+                        while !Task.isCancelled {
+                            try? await Task.sleep(nanoseconds: 100_000_000)
+                            guard !Task.isCancelled, let self,
+                                  self.speechStarted,
+                                  !self.didSignalSilence,
+                                  Date().timeIntervalSince(self.lastVoicedAt) >= Config.shared.silenceTimeout
+                            else { continue }
+                            self.didSignalSilence = true
+                            self.onSilence?()
                         }
                     }
                 }
@@ -387,6 +426,8 @@ final class WhisperSpeechEngine: SpeechEngine {
         finishing = true
         partialTask?.cancel()
         partialTask = nil
+        silenceTask?.cancel()
+        silenceTask = nil
         audioEngine.stop()
         audioEngine.inputNode.removeTap(onBus: 0)
         guard whisperKit != nil else {
@@ -416,6 +457,8 @@ final class WhisperSpeechEngine: SpeechEngine {
     func cancel() {
         partialTask?.cancel()
         partialTask = nil
+        silenceTask?.cancel()
+        silenceTask = nil
         loadTask?.cancel()
         loadTask = nil
         finishTask?.cancel()
@@ -427,6 +470,14 @@ final class WhisperSpeechEngine: SpeechEngine {
         converter = nil
         samples = []
         finishing = false
+        speechStarted = false
+        noiseFloor = nil
+        noiseFloorSampleCount = 0
+        voicedSamples = 0
+        samplesAtLastVoice = 0
+        samplesAtLastPass = 0
+        lastPassText = ""
+        didSignalSilence = false
     }
 
     private func startAudio() throws {
@@ -502,6 +553,17 @@ final class WhisperSpeechEngine: SpeechEngine {
 
     private func append(_ floats: [Float]) {
         samples.append(contentsOf: floats)
+        let rms = SpeechEnergy.rms(floats)
+        noiseFloor = SpeechEnergy.updatedNoiseFloor(current: noiseFloor, rms: rms)
+        noiseFloorSampleCount += floats.count
+        if SpeechEnergy.isVoiced(rms: rms, noiseFloor: noiseFloor ?? 0.002) {
+            voicedSamples += floats.count
+            lastVoicedAt = Date()
+            samplesAtLastVoice = samples.count
+            if voicedSamples >= Int(0.2 * 16_000) {
+                speechStarted = true
+            }
+        }
         let maxSamples = 30 * 16_000
         if samples.count > maxSamples {
             samples.removeFirst(samples.count - maxSamples)
@@ -513,14 +575,22 @@ final class WhisperSpeechEngine: SpeechEngine {
             if isFinal { onFinal?("") }
             return
         }
-        guard isFinal || samples.count >= 8_000 else { return }
         if transcriptionInFlight {
             transcriptionDirty = true
             return
         }
+        if isFinal, samplesAtLastVoice <= samplesAtLastPass, !lastPassText.isEmpty {
+            onFinal?(lastPassText)
+            return
+        }
+        guard isFinal || samples.count - samplesAtLastPass >= 8_000 else { return }
         transcriptionInFlight = true
         transcriptionDirty = false
         let audio = samples
+        if !isFinal {
+            samplesAtLastPass = audio.count
+        }
+        let started = Date()
         let prompt = "Jev Voice. Apps and names: " + vocabulary.prefix(60).joined(separator: ", ")
         let tokens = whisperKit.tokenizer.map {
             Array($0.encode(text: prompt).prefix(200))
@@ -561,7 +631,7 @@ final class WhisperSpeechEngine: SpeechEngine {
             )
         }
         Log.speech.info(
-            "whisper pass final=\(isFinal) samples=\(audio.count) text=\(text, privacy: .public)"
+            "whisper pass final=\(isFinal) samples=\(audio.count) text=\(text, privacy: .public) elapsed=\(Date().timeIntervalSince(started), privacy: .public)"
         )
         if failure == nil, text.isEmpty {
             Log.speech.info("whisper transcribe empty samples=\(audio.count)")
@@ -571,6 +641,7 @@ final class WhisperSpeechEngine: SpeechEngine {
         } else if isFinal {
             onFinal?(text)
         } else if !text.isEmpty {
+            lastPassText = text
             onPartial?(text)
         }
         transcriptionInFlight = false

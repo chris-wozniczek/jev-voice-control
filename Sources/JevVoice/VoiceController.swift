@@ -187,8 +187,10 @@ final class VoiceController: ObservableObject {
                 transcript = ""
                 suggestions = []
                 suggestionClause = ""
-                recognizer.contextualStrings =
-                    AppRegistry.shared.spokenVariants + config.customVocabulary
+                recognizer.contextualStrings = SpeechRecognizer.orderedVocabulary(
+                    extra: config.customVocabulary,
+                    appNames: AppRegistry.shared.spokenVariants
+                )
                 try recognizer.start()
                 status = .listening
                 onListeningChanged?(true)
