@@ -651,6 +651,18 @@ final class AgentRunner: ObservableObject {
                 )
             }
             try await confirmIfRisky(tool: "press_key", token: nil, key: key)
+            let viaMenu = call.arguments["via_menu"]?.boolValue == true
+            if viaMenu || modifiers.contains(where: {
+                $0.caseInsensitiveCompare("command") == .orderedSame
+            }) {
+                if AXMenuBar.pressMenuItem(
+                    pid: pid_t(pid),
+                    key: key,
+                    modifiers: modifiers
+                ) {
+                    return try await afterMutation("Pressed \(key)")
+                }
+            }
             let result = try await measureCua {
                 try await CuaDriver.shared.pressKey(
                     pid: pid,
@@ -1109,8 +1121,10 @@ final class AgentRunner: ObservableObject {
     }
 
     private func focusTextElementIfNeeded(pid: Int) async throws {
-        if let focused = KeyboardFocus.focusedElement(pid: pid_t(pid)),
-           KeyboardFocus.textRoles.contains(focused.role) {
+        if TextEntry.focusedTextInput(pid: pid_t(pid)) != nil {
+            return
+        }
+        if TextEntry.focusTextElementIfNeeded(pid: pid_t(pid)) {
             return
         }
         let fields = lastSnapshot?.elements.filter {
@@ -1173,8 +1187,8 @@ final class AgentRunner: ObservableObject {
         case .confirmed:
             return fallback
         case .unobservable:
-            Log.agent.info("type readback=unobservable")
-            return "\(fallback) (unverified)"
+            Log.agent.info("type readback=unobservable (unverified)")
+            return fallback
         case .missing:
             Log.agent.info("type readback=miss")
             KeyboardFocus.typeUnicode(text)
@@ -1189,8 +1203,8 @@ final class AgentRunner: ObservableObject {
             case .confirmed:
                 return fallback
             case .unobservable:
-                Log.agent.info("type readback=unobservable")
-                return "\(fallback) (unverified)"
+                Log.agent.info("type readback=unobservable (unverified)")
+                return fallback
             case .missing:
                 return "Typed \(text) but the field did not show it"
             }

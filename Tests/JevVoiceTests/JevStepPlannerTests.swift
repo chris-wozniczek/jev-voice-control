@@ -153,6 +153,97 @@ final class JevStepPlannerTests: XCTestCase {
     }
 
     @MainActor
+    func testDoneAtModerateConfidenceAfterMutationReturnsDone() async throws {
+        let fake = FakeJev(answer: .choice(choice: "done", confidence: 0.63, probabilities: ["done": 0.63]))
+        let planner = JevStepPlanner(client: fake, canEscalate: false)
+        let turn = try await planner.next(PlannerContext(
+            goal: "open a new session",
+            snapshot: snapshot([
+                CuaElement(token: "tok-new", role: "AXButton", label: "New Session", value: nil),
+            ]),
+            history: [
+                PlannerStepRecord(tool: "click", argsSummary: "element_token=tok-new", resultText: "Clicked", succeeded: true),
+            ],
+            stepIndex: 1
+        ))
+        XCTAssertEqual(turn.toolCalls.first?.name, "done")
+    }
+
+    @MainActor
+    func testAlternatingFingerprintsBecomeStuck() async throws {
+        let fake = FakeJev(answer: .choice(choice: "e1", confidence: 0.9, probabilities: ["e1": 0.9]))
+        let planner = JevStepPlanner(client: fake, canEscalate: false)
+        let snapshots = [
+            snapshot([CuaElement(token: "a", role: "AXButton", label: "A", value: nil)]),
+            snapshot([CuaElement(token: "b", role: "AXButton", label: "B", value: nil)]),
+            snapshot([CuaElement(token: "a", role: "AXButton", label: "A", value: nil)]),
+            snapshot([CuaElement(token: "b", role: "AXButton", label: "B", value: nil)]),
+        ]
+        var last: PlannerTurn?
+        for current in snapshots {
+            last = try await planner.next(PlannerContext(
+                goal: "open a session",
+                snapshot: current,
+                history: [
+                    PlannerStepRecord(tool: "click", argsSummary: "element_token=a", resultText: "Clicked", succeeded: true),
+                ],
+                stepIndex: 1
+            ))
+        }
+        XCTAssertEqual(last?.toolCalls.first?.name, "fail")
+        XCTAssertEqual(
+            last?.toolCalls.first?.arguments["reason"]?.stringValue,
+            "The screen keeps toggling between two states"
+        )
+    }
+
+    @MainActor
+    func testNewGoalWordControlReturnsDone() async throws {
+        let fake = FakeJev(answer: .choice(choice: "e1", confidence: 0.9, probabilities: ["e1": 0.9]))
+        let planner = JevStepPlanner(client: fake, canEscalate: false)
+        _ = try await planner.next(PlannerContext(
+            goal: "change model to SWE-2 High",
+            snapshot: snapshot([
+                CuaElement(token: "tok-model", role: "AXButton", label: "Model", value: nil),
+            ])
+        ))
+        let options = try await planner.next(PlannerContext(
+            goal: "change model to SWE-2 High",
+            snapshot: snapshot([
+                CuaElement(token: "tok-model", role: "AXButton", label: "Model", value: nil),
+                CuaElement(token: "tok-option", role: "AXMenuItem", label: "SWE-2 High Free", value: nil),
+            ]),
+            history: [
+                PlannerStepRecord(
+                    tool: "click",
+                    argsSummary: "element_token=tok-model",
+                    resultText: "Opened model options",
+                    succeeded: true
+                ),
+            ],
+            stepIndex: 1
+        ))
+        XCTAssertNotEqual(options.toolCalls.first?.name, "done")
+
+        let turn = try await planner.next(PlannerContext(
+            goal: "change model to SWE-2 High",
+            snapshot: snapshot([
+                CuaElement(token: "tok-model", role: "AXButton", label: "SWE-2 High", value: nil),
+            ]),
+            history: [
+                PlannerStepRecord(
+                    tool: "click",
+                    argsSummary: "element_token=tok-option",
+                    resultText: "Selected SWE-2 High",
+                    succeeded: true
+                ),
+            ],
+            stepIndex: 2
+        ))
+        XCTAssertEqual(turn.toolCalls.first?.name, "done")
+    }
+
+    @MainActor
     func testGeneratedTextIsTypedVerbatim() async throws {
         let fake = FakeJev(
             answer: .choice(choice: "e1", confidence: 0.9, probabilities: ["e1": 0.9]),
@@ -462,7 +553,7 @@ final class JevStepPlannerTests: XCTestCase {
     }
 
     @MainActor
-    func testLowConfidenceFailsOrEscalates() async throws {
+    func testLowConfidenceClickDefers() async throws {
         let fake = FakeJev(answer: .choice(choice: "e1", confidence: 0.2, probabilities: ["e1": 0.2]), goalReached: 0)
         let planner = JevStepPlanner(client: fake, canEscalate: false)
         let turn = try await planner.next(PlannerContext(
@@ -472,7 +563,7 @@ final class JevStepPlannerTests: XCTestCase {
                 CuaElement(token: "tok-new", role: "AXButton", label: "New Session", value: nil),
             ])
         ))
-        XCTAssertEqual(turn.toolCalls.first?.name, "fail")
+        XCTAssertEqual(turn.toolCalls.first?.name, "observe")
     }
 
     @MainActor

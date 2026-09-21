@@ -24,7 +24,8 @@ public enum LocalCommandParser {
         }
 
         if trimmed.range(
-            of: #"^(type|write|dictate|say)\b"#, options: [.regularExpression, .caseInsensitive]
+            of: #"^\s*(?:type(?:\s+(?:in|out))?|write|dictate|say|enter)\b"#,
+            options: [.regularExpression, .caseInsensitive]
         ) != nil,
            let text = SlotExtractor.dictationText(from: trimmed) {
             return Decision(

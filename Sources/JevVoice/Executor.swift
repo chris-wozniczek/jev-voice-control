@@ -249,18 +249,26 @@ enum Executor {
 
     private static func dictate(_ text: String, frontmostApp: String?) async -> String {
         let ownBundleID = Bundle.main.bundleIdentifier
-        let application = frontmostApp.flatMap { name in
-            NSWorkspace.shared.runningApplications.first {
-                $0.localizedName?.caseInsensitiveCompare(name) == .orderedSame
+        let application: NSRunningApplication?
+        if let frontmostApp {
+            application = NSWorkspace.shared.runningApplications.first {
+                $0.localizedName?.caseInsensitiveCompare(frontmostApp) == .orderedSame
             }
+        } else {
+            application = NSWorkspace.shared.frontmostApplication
         }
         if frontmostApp != nil, application == nil {
             return "Nothing to type into — click where the text should go first"
-        } else if let application {
-            guard await KeyboardFocus.bringToFront(pid: application.processIdentifier) else {
-                return "Nothing to type into — click where the text should go first"
-            }
-        } else if NSWorkspace.shared.frontmostApplication?.bundleIdentifier == ownBundleID {
+        }
+        guard let application,
+              application.bundleIdentifier != ownBundleID,
+              await KeyboardFocus.bringToFront(pid: application.processIdentifier) else {
+            return "Nothing to type into — click where the text should go first"
+        }
+        let pid = application.processIdentifier
+        if TextEntry.focusedTextInput(pid: pid) == nil,
+           !TextEntry.focusTextElementIfNeeded(pid: pid),
+           TextEntry.focusedTextInput(pid: pid) == nil {
             return "Nothing to type into — click where the text should go first"
         }
         let pasteboard = NSPasteboard.general
@@ -290,7 +298,28 @@ enum Executor {
                 if !saved.isEmpty { pasteboard.writeObjects(saved) }
             }
         }
-        return "Typed \"\(text)\""
+        try? await Task.sleep(for: .milliseconds(150))
+        switch TextEntry.readBack(pid: pid, text: text) {
+        case .confirmed:
+            return "Typed \"\(text)\""
+        case .unobservable:
+            Log.agent.info("type readback=unobservable (unverified)")
+            return "Typed \"\(text)\""
+        case .missing:
+            Log.agent.info("type readback=miss")
+        }
+        _ = try? await CuaDriver.shared.type(pid: Int(pid), text: text)
+        try? await Task.sleep(for: .milliseconds(150))
+        switch TextEntry.readBack(pid: pid, text: text) {
+        case .confirmed:
+            return "Typed \"\(text)\""
+        case .unobservable:
+            Log.agent.info("type readback=unobservable (unverified)")
+            return "Typed \"\(text)\""
+        case .missing:
+            let name = application.localizedName ?? frontmostApp ?? "the app"
+            return "Couldn't type into \(name) — the text didn't appear"
+        }
     }
 
     private static func runSystem(_ action: SystemAction, percent: Int?) throws -> String {

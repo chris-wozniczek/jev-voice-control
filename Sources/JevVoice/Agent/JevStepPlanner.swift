@@ -59,6 +59,9 @@ final class JevStepPlanner: ActionPlanner {
     private var recoveryCount = 0
     private var wrongSurfaceTitle: String?
     private var closeShortcutIssued = false
+    private var recentFingerprints: [String] = []
+    private var initialControlTexts: Set<String>?
+    private var previousElementCount: Int?
 
     private let interactiveRoles: Set<String> = [
         "AXButton", "AXLink", "AXTextField", "AXTextArea", "AXMenuItem",
@@ -85,6 +88,8 @@ final class JevStepPlanner: ActionPlanner {
                 )
             )
         }
+        let previousElementCount = self.previousElementCount
+        self.previousElementCount = snapshot.elements.count
 
         let candidates = makeCandidates(
             snapshot.elements,
@@ -102,6 +107,9 @@ final class JevStepPlanner: ActionPlanner {
         }
 
         let textToType = ctx.generatedText ?? SlotExtractor.typedText(from: ctx.goal)
+        let hasMutation = ctx.history.contains {
+            ["click", "click_at", "type_text", "press_key", "open_app"].contains($0.tool)
+        }
         let clickedLabels: Set<String> = Set(ctx.history.compactMap { record -> String? in
             guard record.succeeded,
                   ["click", "click_at"].contains(record.tool),
@@ -262,8 +270,7 @@ final class JevStepPlanner: ActionPlanner {
                 modifiers: []
             )
         }
-        if goalReached >= 0.7,
-           ctx.history.contains(where: { ["click", "click_at", "type_text", "press_key", "open_app"].contains($0.tool) }) {
+        if (choice == "done" && confidence >= 0.5 || goalReached >= 0.7), hasMutation {
             if textToType != nil, ctx.typedTextVisible == false {
                 return stuckTurn(
                     reason: "The typed text is not visible in the current field",
@@ -283,6 +290,51 @@ final class JevStepPlanner: ActionPlanner {
         let fingerprint = snapshot.elements.map {
             "\($0.role)|\($0.label)|\($0.value ?? "")"
         }.joined(separator: "\n")
+        if initialControlTexts == nil {
+            initialControlTexts = Set(snapshot.elements.map {
+                "\($0.role)|\($0.label)|\($0.value ?? "")"
+            })
+        }
+        let goalWords = GoalWords.words(ctx.goal)
+        let lastGoalSharingClick = ctx.history.last.flatMap { record -> PlannerStepRecord? in
+            guard record.succeeded,
+                  ["click", "click_at"].contains(record.tool),
+                  !goalWords.isDisjoint(with: GoalWords.words(record.resultText)) else {
+                return nil
+            }
+            return record
+        }
+        if let previousElementCount,
+           snapshot.elements.count <= previousElementCount,
+           lastGoalSharingClick != nil,
+           let initialControlTexts,
+           snapshot.elements.contains(where: { element in
+               let key = "\(element.role)|\(element.label)|\(element.value ?? "")"
+               guard !initialControlTexts.contains(key) else { return false }
+               return !GoalWords.words(ctx.goal).isDisjoint(
+                   with: GoalWords.words("\(element.label) \(element.value ?? "")")
+               )
+           }) {
+            return makeTurn(call: DeepSeekToolCall(
+                id: "jev-\(ctx.stepIndex + 1)",
+                name: "done",
+                arguments: ["summary": .string(summary(for: ctx.goal))]
+            ))
+        }
+        if recentFingerprints.count >= 3,
+           fingerprint == recentFingerprints[recentFingerprints.count - 2],
+           recentFingerprints[recentFingerprints.count - 1]
+                == recentFingerprints[recentFingerprints.count - 3] {
+            return stuckTurn(
+                reason: "The screen keeps toggling between two states",
+                step: ctx.stepIndex + 1,
+                preserveReason: true
+            )
+        }
+        recentFingerprints.append(fingerprint)
+        if recentFingerprints.count > 4 {
+            recentFingerprints.removeFirst()
+        }
         var selectedChoice = choice == "done" && goalReached < 0.7
             ? highestAlternative(probabilities: probabilities)
             : choice
@@ -311,6 +363,30 @@ final class JevStepPlanner: ActionPlanner {
             if actionKey == previousActionKey, fingerprint == previousFingerprint {
                 return stuckTurn(
                     reason: "The same low-confidence choice repeated",
+                    step: ctx.stepIndex + 1
+                )
+            }
+            previousActionKey = actionKey
+            previousFingerprint = fingerprint
+            try await Task.sleep(nanoseconds: 700_000_000)
+            Log.agent.info(
+                "jev step defer choice=\(selectedChoice, privacy: .public) confidence=\(confidence)"
+            )
+            return makeTurn(call: DeepSeekToolCall(
+                id: "jev-\(ctx.stepIndex + 1)",
+                name: "observe",
+                arguments: [
+                    "app": ctx.targetApp.map(JSONValue.string) ?? .null,
+                    "screenshot": .bool(false),
+                ]
+            ))
+        }
+        if let selectedCandidate,
+           !selectedCandidate.elementRoleIsText,
+           confidence < 0.45 {
+            if actionKey == previousActionKey, fingerprint == previousFingerprint {
+                return stuckTurn(
+                    reason: "The same low-confidence click repeated",
                     step: ctx.stepIndex + 1
                 )
             }
@@ -483,9 +559,13 @@ final class JevStepPlanner: ActionPlanner {
         ))
     }
 
-    private func stuckTurn(reason: String, step: Int) -> PlannerTurn {
+    private func stuckTurn(
+        reason: String,
+        step: Int,
+        preserveReason: Bool = false
+    ) -> PlannerTurn {
         if canEscalate { return escalation(reason) }
-        return makeFailure("I couldn't make progress", step: step)
+        return makeFailure(preserveReason ? reason : "I couldn't make progress", step: step)
     }
 
     private func uncertainTurn(app: String?, step: Int) -> PlannerTurn {

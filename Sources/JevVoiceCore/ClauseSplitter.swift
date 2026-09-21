@@ -36,7 +36,7 @@ public enum ClauseSplitter {
     }
 
     private static let conjunctionPattern = #"\b(and then|and also|then|and)\b"#
-    private static let dictationVerbs: Set<String> = ["type", "write", "dictate", "say"]
+    private static let dictationVerbs: Set<String> = ["type", "write", "dictate", "say", "enter"]
 
     public static func candidateBoundaries(_ transcript: String) -> [Boundary] {
         let ns = transcript as NSString

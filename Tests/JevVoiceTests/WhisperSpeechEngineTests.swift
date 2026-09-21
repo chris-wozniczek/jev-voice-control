@@ -3,6 +3,33 @@ import XCTest
 @testable import JevVoice
 
 final class WhisperSpeechEngineTests: XCTestCase {
+    func testFinalTextPrefersPassAndFallsBackToLastPartial() {
+        XCTAssertEqual(
+            WhisperSpeechEngine.finalText(
+                passText: "fresh",
+                failure: nil,
+                lastPartial: "stale"
+            ),
+            "fresh"
+        )
+        XCTAssertEqual(
+            WhisperSpeechEngine.finalText(
+                passText: nil,
+                failure: CancellationError(),
+                lastPartial: "partial"
+            ),
+            "partial"
+        )
+        XCTAssertEqual(
+            WhisperSpeechEngine.finalText(
+                passText: nil,
+                failure: nil,
+                lastPartial: ""
+            ),
+            ""
+        )
+    }
+
     func testConvertHandlesConsecutiveBuffers() throws {
         guard
             let inputFormat = AVAudioFormat(

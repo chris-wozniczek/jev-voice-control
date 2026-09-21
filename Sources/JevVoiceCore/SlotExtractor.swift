@@ -58,11 +58,50 @@ public enum SlotExtractor {
     }
 
     public static func dictationText(from clause: String) -> String? {
-        let lowered = clause.lowercased()
-        guard let range = lowered.range(
-            of: #"\b(type|write|dictate|say)\b"#, options: .regularExpression
-        ) else { return nil }
-        let text = clause[range.upperBound...].trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmed = clause.trimmingCharacters(in: .whitespacesAndNewlines)
+        let prefixes = ["type in", "type out", "type", "write", "dictate", "say", "enter"]
+            .sorted { $0.count > $1.count }
+        guard let prefix = prefixes.first(where: { candidate in
+            guard let range = trimmed.range(of: candidate, options: .caseInsensitive),
+                  range.lowerBound == trimmed.startIndex else {
+                return false
+            }
+            guard range.upperBound < trimmed.endIndex else { return true }
+            let next = trimmed[range.upperBound]
+            return next.isWhitespace || ":,-—".contains(next)
+        }), let range = trimmed.range(of: prefix, options: .caseInsensitive) else {
+            return nil
+        }
+        var text = String(trimmed[range.upperBound...])
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        while let first = text.first, ":,-—".contains(first) {
+            text.removeFirst()
+            text = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        let fillerWords = ["prompt", "message", "text", "following"]
+        let fillerPrefixes = (
+            fillerWords
+                + ["the", "a", "this"].flatMap { article in
+                    fillerWords.map { "\(article) \($0)" }
+                }
+        ).sorted { $0.count > $1.count }
+        if let filler = fillerPrefixes.first(where: { candidate in
+            guard let match = text.range(of: candidate, options: .caseInsensitive),
+                  match.lowerBound == text.startIndex else {
+                return false
+            }
+            guard match.upperBound < text.endIndex else { return true }
+            let next = text[match.upperBound]
+            return next.isWhitespace || ":,-—".contains(next)
+        }), let fillerRange = text.range(of: filler, options: .caseInsensitive) {
+            text = String(text[fillerRange.upperBound...])
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            while let first = text.first, ":,-—".contains(first) {
+                text.removeFirst()
+                text = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            }
+        }
+        text = text.trimmingCharacters(in: .whitespacesAndNewlines)
         return text.isEmpty ? nil : text
     }
 
