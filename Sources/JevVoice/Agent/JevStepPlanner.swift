@@ -140,7 +140,11 @@ final class JevStepPlanner: ActionPlanner {
                Self.isCreationControl(label: label) {
                 creationLabel = label
             } else if lastRecord.tool == "press_key",
-                      lastRecord.argsSummary.localizedCaseInsensitiveContains("command") {
+                      lastRecord.argsSummary.localizedCaseInsensitiveContains("command"),
+                      lastRecord.argsSummary.range(
+                          of: #"\bkey\s*=\s*[nt]\b"#,
+                          options: [.regularExpression, .caseInsensitive]
+                      ) != nil {
                 creationLabel = lastRecord.elementLabel ?? "press_key"
             } else {
                 creationLabel = nil
@@ -429,7 +433,7 @@ final class JevStepPlanner: ActionPlanner {
             : choice
         if let selected = candidates.first(where: { $0.id == selectedChoice }),
            Self.isCreationControl(label: selected.element.label) {
-            if let creationFired {
+            if creationFired != nil {
                 let alternative = highestAlternative(
                     probabilities: probabilities,
                     excluding: [selected.id]
@@ -452,7 +456,6 @@ final class JevStepPlanner: ActionPlanner {
                         step: ctx.stepIndex + 1
                     )
                 }
-                _ = creationFired
             } else if !goalIsCreation {
                 let alternative = highestAlternative(
                     probabilities: probabilities,

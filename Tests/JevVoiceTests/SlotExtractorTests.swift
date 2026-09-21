@@ -62,6 +62,10 @@ final class SlotExtractorTests: XCTestCase {
     func testDictationText() {
         XCTAssertEqual(SlotExtractor.dictationText(from: "type hello world"), "hello world")
         XCTAssertEqual(
+            SlotExtractor.dictationText(from: "type note to self buy milk"),
+            "note to self buy milk"
+        )
+        XCTAssertEqual(
             SlotExtractor.dictationText(from: "type the prompt. Check RAM usage"),
             "Check RAM usage"
         )

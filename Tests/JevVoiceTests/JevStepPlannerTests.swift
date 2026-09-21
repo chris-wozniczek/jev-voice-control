@@ -92,6 +92,35 @@ final class JevStepPlannerTests: XCTestCase {
     }
 
     @MainActor
+    func testCommandWDoesNotSatisfyOpenGoalAsCreation() async throws {
+        let fake = FakeJev(answer: .choice(choice: "e1", confidence: 0.9, probabilities: ["e1": 0.9]))
+        let planner = JevStepPlanner(client: fake, canEscalate: false)
+        _ = try await planner.next(PlannerContext(
+            goal: "open settings",
+            snapshot: snapshot([
+                CuaElement(token: "old", role: "AXButton", label: "Old", value: nil),
+            ])
+        ))
+        let turn = try await planner.next(PlannerContext(
+            goal: "open settings",
+            snapshot: snapshot([
+                CuaElement(token: "settings", role: "AXButton", label: "Settings", value: nil),
+            ]),
+            history: [
+                PlannerStepRecord(
+                    tool: "press_key",
+                    argsSummary: "key=w modifiers=command",
+                    resultText: "Pressed command-w",
+                    succeeded: true
+                ),
+            ],
+            stepIndex: 1
+        ))
+        XCTAssertNotEqual(turn.toolCalls.first?.name, "done")
+        XCTAssertNotNil(fake.questions["next_action"])
+    }
+
+    @MainActor
     func testNonCreationGoalSkipsNewControlAndTypesGeneratedText() async throws {
         let fake = FakeJev(answer: .choice(choice: "e1", confidence: 0.62, probabilities: ["e1": 0.9]))
         let planner = JevStepPlanner(client: fake, canEscalate: false)

@@ -217,10 +217,16 @@ public enum SlotExtractor {
             return text
         }
         let matched = String(text[range]).lowercased()
-        guard matched.range(
-            of: #"\b(?:prompt|message|text|note|input|search|chat|box|field|area|bar)\b"#,
+        let hasBoxWord = matched.range(
+            of: #"\b(?:box|field|area|bar)\b"#,
             options: .regularExpression
-        ) != nil else {
+        ) != nil
+        let hasPromptWord = matched.range(
+            of: #"\bprompt\b"#,
+            options: .regularExpression
+        ) != nil
+        let hasPunctuation = matched.contains { ":,.-—".contains($0) }
+        guard hasBoxWord || hasPromptWord || hasPunctuation else {
             return text
         }
         return String(text[range.upperBound...]).trimmingCharacters(in: .whitespacesAndNewlines)
