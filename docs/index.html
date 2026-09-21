@@ -1,0 +1,368 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <script>document.documentElement.classList.add('js')</script>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Jev Voice — talk to your Mac. Jev decides, the app verifies.</title>
+  <meta name="description" content="An open-source macOS menu-bar voice assistant: on-device speech, typed decisions from TypeSafe's Jev, grounded Accessibility actions, verified before it says Done.">
+  <meta property="og:title" content="Jev Voice — talk to your Mac">
+  <meta property="og:description" content="On-device speech → one Jev request → grounded click/type → verified. The full flow, step by step.">
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://chris-wozniczek.github.io/jev-voice-control/">
+  <meta name="twitter:card" content="summary">
+  <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+
+  <header class="nav" id="nav">
+    <a class="nav-brand" href="#top" aria-label="Jev Voice — top">
+      <svg class="mark" viewBox="0 0 64 64" aria-hidden="true">
+        <defs><linearGradient id="jv-g" x1="0" y1="0" x2="64" y2="64" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#a89cff"/><stop offset="1" stop-color="#4b3ad9"/></linearGradient></defs>
+        <rect x="4" y="4" width="56" height="56" rx="14" fill="url(#jv-g)"/>
+        <g stroke="#fff" stroke-width="4" stroke-linecap="round">
+          <line x1="18" y1="28" x2="18" y2="36"/><line x1="26" y1="20" x2="26" y2="44"/><line x1="34" y1="14" x2="34" y2="50"/><line x1="42" y1="22" x2="42" y2="42"/><line x1="50" y1="29" x2="50" y2="35"/>
+        </g>
+      </svg>
+      <span class="wordmark">JEV<em>VOICE</em></span>
+    </a>
+    <nav class="nav-links" aria-label="Sections">
+      <a href="#flow">Flow</a>
+      <a href="#decide">How it decides</a>
+      <a href="#reliable">Reliability</a>
+      <a href="#safety">Safety</a>
+      <a href="#install">Install</a>
+      <a href="https://github.com/chris-wozniczek/jev-voice-control/blob/main/DESIGN.md">Design doc</a>
+    </nav>
+    <div class="nav-actions">
+      <a class="icon-btn" href="https://github.com/chris-wozniczek/jev-voice-control" target="_blank" rel="noopener" aria-label="Jev Voice on GitHub">
+        <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5C5.65.5.5 5.65.5 12c0 5.08 3.29 9.39 7.86 10.91.58.11.79-.25.79-.55v-2.15c-3.2.7-3.87-1.36-3.87-1.36-.52-1.33-1.28-1.69-1.28-1.69-1.04-.71.08-.7.08-.7 1.15.08 1.76 1.19 1.76 1.19 1.03 1.75 2.69 1.25 3.34.95.11-.74.4-1.25.73-1.53-2.55-.29-5.23-1.28-5.23-5.68 0-1.26.45-2.28 1.19-3.09-.12-.29-.52-1.46.11-3.05 0 0 .97-.31 3.17 1.18a11.1 11.1 0 0 1 5.78 0c2.2-1.49 3.17-1.18 3.17-1.18.63 1.59.23 2.76.11 3.05.74.81 1.19 1.83 1.19 3.09 0 4.41-2.69 5.38-5.25 5.67.41.36.78 1.06.78 2.14v3.17c0 .31.21.66.8.55A11.51 11.51 0 0 0 23.5 12C23.5 5.65 18.35.5 12 .5z"/></svg>
+      </a>
+      <a class="icon-btn" href="https://x.com/chris_wozniczek" target="_blank" rel="noopener" aria-label="@chris_wozniczek on X">
+        <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231 5.451-8.38zm-1.161 17.52h1.833L7.084 4.126H5.117l11.966 15.644z"/></svg>
+      </a>
+      <button class="hamburger" type="button" aria-label="Open menu" aria-expanded="false" aria-controls="mobile-menu"><span></span><span></span><span></span></button>
+    </div>
+  </header>
+  <div class="mobile-menu" id="mobile-menu" hidden>
+    <nav aria-label="Mobile sections">
+      <a href="#flow">Flow</a><a href="#decide">How it decides</a><a href="#reliable">Reliability</a><a href="#safety">Safety</a><a href="#install">Install</a>
+      <a href="https://github.com/chris-wozniczek/jev-voice-control/blob/main/DESIGN.md">Design doc</a>
+    </nav>
+  </div>
+
+  <main id="main">
+    <!-- ============ HERO ============ -->
+    <section class="hero" id="top">
+      <div class="wrap hero-inner">
+        <div>
+          <p class="eyebrow">Open source · macOS menu bar · v0.9.1</p>
+          <h1>Talk to your Mac.<br><em>Jev decides. The app verifies.</em></h1>
+          <p class="hero-sub">Hold <kbd>⌥ Space</kbd>, say what you want — "open a new session in Devin", "type in the prompt box check CPU usage", "quit Spotify" — and release. Speech stays on-device, every decision is a typed answer from <a href="https://typesafe.ai">TypeSafe's Jev</a>, and nothing is called done until the screen proves it.</p>
+          <div class="hero-ctas">
+            <a class="btn btn-primary" href="#install">Install with Homebrew</a>
+            <a class="btn btn-ghost" href="#flow">See the full flow</a>
+          </div>
+          <div class="hero-meta">
+            <span>on-device speech</span><span>no LLM in the loop by default</span><span>MIT licensed</span>
+          </div>
+        </div>
+        <div class="voice-card" aria-label="Animated example of a command">
+          <div class="vc-top"><i class="dot" id="vc-dot"></i><span id="vc-state">listening · hold ⌥Space</span></div>
+          <div class="wave" id="wave" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+          <div class="vc-transcript"><span id="vc-text"></span><span class="caret" aria-hidden="true"></span></div>
+          <ul class="vc-steps" id="vc-steps"></ul>
+          <p class="vc-hint">Release the key and the command fires. No silence timer, nothing cut off.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ FLOW ============ -->
+    <section class="section" id="flow">
+      <div class="wrap">
+        <p class="eyebrow" data-reveal>01 / The flow</p>
+        <h2 data-reveal>One utterance, end to end</h2>
+        <p class="section-sub" data-reveal>Pick a command to light up the path it takes. Solid boxes are local code, indigo boxes are single Jev requests, green is verification, dashed amber is a bounded fallback that only runs when the step before it failed.</p>
+
+        <div class="flow-controls" data-reveal role="tablist" aria-label="Example command">
+          <span class="lbl">command</span>
+          <button class="chip is-on" role="tab" aria-selected="true" data-scn="local">"quit Spotify"</button>
+          <button class="chip" role="tab" aria-selected="false" data-scn="ui">"open a new session in Devin"</button>
+          <button class="chip" role="tab" aria-selected="false" data-scn="dictate">"type in the prompt box check CPU usage"</button>
+          <button class="chip" role="tab" aria-selected="false" data-scn="sparse">"send the prompt" (sparse Electron tree)</button>
+          <button class="chip" role="tab" aria-selected="false" data-scn="browser">"post this on X"</button>
+        </div>
+        <p class="flow-desc" id="flow-desc" data-reveal></p>
+
+        <div class="card" data-reveal>
+          <div class="flow-scroll">
+            <svg id="flow-svg" viewBox="0 0 1000 440" role="img" aria-labelledby="flow-title">
+              <title id="flow-title">Jev Voice pipeline: hear, decide, act, verify</title>
+              <defs>
+                <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="rgba(255,255,255,.35)"/></marker>
+                <marker id="arr-lit" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#8b7cff"/></marker>
+              </defs>
+
+              <!-- lanes -->
+              <rect class="fl-band" x="8" y="14" width="984" height="64" rx="12"/>
+              <rect class="fl-band" x="8" y="92" width="984" height="64" rx="12"/>
+              <rect class="fl-band" x="8" y="170" width="984" height="80" rx="12"/>
+              <rect class="fl-band" x="8" y="264" width="984" height="80" rx="12"/>
+              <rect class="fl-band" x="8" y="358" width="984" height="72" rx="12"/>
+              <text class="fl-lane" x="20" y="30">you</text>
+              <text class="fl-lane" x="20" y="108">hear · on-device</text>
+              <text class="fl-lane" x="20" y="186">decide</text>
+              <text class="fl-lane" x="20" y="280">act</text>
+              <text class="fl-lane" x="20" y="374">verify</text>
+
+              <!-- links -->
+              <g id="fl-links">
+                <path class="fl-link" data-l="speak-engine" d="M165 66 L165 108" marker-end="url(#arr)"/>
+                <path class="fl-link" data-l="engine-norm" d="M220 130 L240 130" marker-end="url(#arr)"/>
+                <path class="fl-link" data-l="norm-parser" d="M310 150 L310 202" marker-end="url(#arr)"/>
+                <path class="fl-link" data-l="parser-router" d="M370 222 L420 222" marker-end="url(#arr)"/>
+                <path class="fl-link" data-l="router-policy" d="M570 222 L610 222" marker-end="url(#arr)"/>
+                <path class="fl-link" data-l="parser-exec" d="M305 242 L305 296" marker-end="url(#arr)"/>
+                <path class="fl-link" data-l="policy-fast" d="M640 242 C640 265 520 262 500 294" marker-end="url(#arr)"/>
+                <path class="fl-link dash" data-l="policy-confirm" d="M700 202 C720 170 780 165 800 150" marker-end="url(#arr)"/>
+                <path class="fl-link dash" data-l="confirm-fast" d="M880 150 C880 210 790 262 700 276 C640 286 570 286 530 296" marker-end="url(#arr)"/>
+                <path class="fl-link" data-l="fast-observe" d="M530 316 L560 316" marker-end="url(#arr)"/>
+                <path class="fl-link" data-l="observe-choice" d="M700 316 L720 316" marker-end="url(#arr)"/>
+                <path class="fl-link" data-l="choice-act" d="M840 316 L860 316" marker-end="url(#arr)"/>
+                <path class="fl-link" data-l="act-verify" d="M925 336 C925 380 900 386 900 386" marker-end="url(#arr)"/>
+                <path class="fl-link" data-l="verify-done" d="M720 406 L690 406" marker-end="url(#arr)"/>
+                <path class="fl-link dash" data-l="verify-recover" d="M720 396 C640 380 600 392 530 396" marker-end="url(#arr)"/>
+                <path class="fl-link dash" data-l="recover-observe" d="M480 386 C500 360 560 350 600 338" marker-end="url(#arr)"/>
+                <path class="fl-link" data-l="exec-done" d="M305 336 C305 370 500 372 560 400" marker-end="url(#arr)"/>
+                <path class="fl-link" data-l="done-you" d="M690 416 C990 416 990 60 990 46 L760 46" marker-end="url(#arr)"/>
+                <text class="fl-label" x="395" y="196" text-anchor="middle">not matched</text>
+                <text class="fl-label" x="318" y="270">matched</text>
+                <text class="fl-label" x="732" y="180">destructive / browser</text>
+                <text class="fl-label" x="640" y="384">verified</text>
+                <text class="fl-label" x="545" y="376">stuck</text>
+              </g>
+
+              <!-- nodes -->
+              <g id="fl-nodes">
+                <g class="fl-node" data-n="speak"><rect x="110" y="26" width="200" height="40"/><text x="210" y="51">Hold ⌥Space · speak · release</text></g>
+                <g class="fl-node" data-n="you-done"><rect x="560" y="26" width="200" height="40"/><text x="660" y="45">"Done." (spoken)</text><text class="sub" x="660" y="59">or the exact reason it stopped</text></g>
+
+                <g class="fl-node" data-n="engine"><rect x="110" y="110" width="110" height="40"/><text x="165" y="128">SpeechAnalyzer</text><text class="sub" x="165" y="142">50–300 ms</text></g>
+                <g class="fl-node" data-n="norm"><rect x="240" y="110" width="150" height="40"/><text x="315" y="128">Normalize · split</text><text class="sub" x="315" y="142">content is never split</text></g>
+                <g class="fl-node fallback" data-n="confirm"><rect x="800" y="110" width="160" height="40"/><text x="880" y="128">Confirm: yes / no</text><text class="sub" x="880" y="142">held utterance · 15 s</text></g>
+
+                <g class="fl-node" data-n="parser"><rect x="240" y="202" width="130" height="40"/><text x="305" y="220">Local parser</text><text class="sub" x="305" y="234">deterministic · 0 ms</text></g>
+                <g class="fl-node jev" data-n="router"><rect x="420" y="202" width="150" height="40"/><text x="495" y="220">Jev router</text><text class="sub" x="495" y="234">7 questions · 1 request</text></g>
+                <g class="fl-node" data-n="policy"><rect x="610" y="202" width="130" height="40"/><text x="675" y="220">Safety policy</text><text class="sub" x="675" y="234">block · confirm</text></g>
+
+                <g class="fl-node" data-n="exec"><rect x="240" y="296" width="130" height="40"/><text x="305" y="314">Executor</text><text class="sub" x="305" y="328">open · quit · URL · keys</text></g>
+                <g class="fl-node" data-n="fast"><rect x="420" y="296" width="110" height="40"/><text x="475" y="314">Fast path</text><text class="sub" x="475" y="328">app-actions · ⌘↩</text></g>
+                <g class="fl-node" data-n="observe"><rect x="560" y="296" width="140" height="40"/><text x="630" y="314">Observe AX tree</text><text class="sub" x="630" y="328">≤1.5 s · partial-aware</text></g>
+                <g class="fl-node jev" data-n="choice"><rect x="720" y="296" width="120" height="40"/><text x="780" y="314">Jev Choice</text><text class="sub" x="780" y="328">pick a real element</text></g>
+                <g class="fl-node" data-n="act"><rect x="860" y="296" width="125" height="40"/><text x="922" y="314">Act once</text><text class="sub" x="922" y="328">press · click · type</text></g>
+
+                <g class="fl-node fallback" data-n="recover"><rect x="240" y="386" width="290" height="40"/><text x="385" y="404">full re-observe → wake → OCR → DeepSeek</text><text class="sub" x="385" y="418">each once · bounded · then a clear failure</text></g>
+                <g class="fl-node verify" data-n="done"><rect x="560" y="386" width="130" height="40"/><text x="625" y="404">Goal met</text><text class="sub" x="625" y="418">verified change</text></g>
+                <g class="fl-node verify" data-n="verify"><rect x="720" y="386" width="180" height="40"/><text x="810" y="404">Re-observe · postcondition</text><text class="sub" x="810" y="418">no "done" on confidence</text></g>
+              </g>
+              <circle class="fl-packet" id="fl-packet" r="5" opacity="0"/>
+            </svg>
+          </div>
+          <div class="flow-legend">
+            <span class="l-local">local code</span><span class="l-jev">Jev request</span><span class="l-ver">verification</span><span class="l-fb">bounded fallback</span>
+          </div>
+        </div>
+
+        <div class="trace" data-reveal>
+          <p class="eyebrow">what the log says</p>
+          <pre><code id="trace"></code></pre>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ DECIDE ============ -->
+    <section class="section" id="decide">
+      <div class="wrap">
+        <p class="eyebrow" data-reveal>02 / How it decides</p>
+        <h2 data-reveal>Decide, don't generate</h2>
+        <p class="section-sub" data-reveal>Jev is a System One model: it answers typed questions with a choice or a probability, in one round trip. It never writes the text that gets typed, and it can only pick a control that is actually on screen — so it cannot invent a button, a coordinate or a URL.</p>
+
+        <div class="grid-2" data-reveal>
+          <div class="card">
+            <h3>One request routes the clause</h3>
+            <p>Every clause the local parser can't settle becomes a single <code>systemOne</code> call with the clause, the full transcript, the frontmost app, installed apps and aliases as state — and seven questions.</p>
+            <table style="margin-top:14px">
+              <thead><tr><th>question</th><th>type</th><th>answer space</th></tr></thead>
+              <tbody>
+                <tr><td>action</td><td><span class="tag choice">choice</span></td><td>openApp · closeApp · openURL · webSearch · dictate · uiTask · system · none</td></tr>
+                <tr><td>target_app</td><td><span class="tag choice">choice</span></td><td>installed app names + none</td></tr>
+                <tr><td>system_action</td><td><span class="tag choice">choice</span></td><td>volumeSet · mute · lockScreen · screenshot · …</td></tr>
+                <tr><td>mentions_url</td><td><span class="tag noul">noul</span></td><td>p(the clause names a website)</td></tr>
+                <tr><td>refers_to_frontmost</td><td><span class="tag noul">noul</span></td><td>p("quit it" means the frontmost app)</td></tr>
+                <tr><td>composes</td><td><span class="tag noul">noul</span></td><td>p(the user wants wording written)</td></tr>
+                <tr><td>destructive</td><td><span class="tag noul">noul</span></td><td>p(hard to undo)</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="card">
+            <h3>One Choice picks the next step</h3>
+            <p>For UI work the app reads the target window's Accessibility tree, ranks the buttons, links, rows, tabs and text fields by overlap with the goal words, and asks Jev one <code>next_action</code> Choice over those real candidates plus <code>done</code> and <code>stuck</code>. Alongside it: <code>goal_reached</code>, <code>wrong_surface</code>, <code>needs_text</code> as probabilities.</p>
+            <pre style="margin-top:14px"><code>candidates:
+  [1] AXButton  "New session"
+  [2] AXTextArea "Ask Devin…"     ← dictation goals see only text inputs
+  [3] AXRow     "Check RAM and CPU consuming resources"
+  [4] OCR       "Send"  (x=1412,y=884)  ← when the tree is thin
+  done · stuck
+
+next_action → 1   (p=0.91)
+goal_reached → 0.08</code></pre>
+            <p style="margin-top:12px">Arguments — URLs, queries, the words to type — are extracted deterministically by <code>SlotExtractor</code>: "type in the prompt box to check CPU" types <code>check CPU</code>. Words that are content never influence which control gets picked.</p>
+          </div>
+        </div>
+
+        <div class="stats" data-reveal>
+          <div class="stat"><b>0 ms</b><span>local parser for open/quit/switch/volume/URL/search</span></div>
+          <div class="stat"><b>1 request</b><span>per routed clause; one more per UI step</span></div>
+          <div class="stat"><b>~10×</b><span>faster per step than the generative planner it replaced</span></div>
+          <div class="stat"><b>≤ 1 in 10</b><span>commands ever reach the DeepSeek fallback</span></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ RELIABILITY ============ -->
+    <section class="section" id="reliable">
+      <div class="wrap">
+        <p class="eyebrow" data-reveal>03 / Reliability</p>
+        <h2 data-reveal>Observe · act once · verify</h2>
+        <p class="section-sub" data-reveal>Computer use fails in boring ways: a sparse Accessibility tree, a click that lands on the wrong row, a "Done" that wasn't. Each step of the loop is designed around those failures.</p>
+
+        <div class="grid-3" data-reveal>
+          <div class="card">
+            <div class="num">OBSERVE</div>
+            <h3>A complete, fresh tree</h3>
+            <p>The in-process walker spends up to 1.5 s (4 s on a full re-observe) and marks snapshots <code>partial</code> when it hits the deadline. Electron apps expose a thin tree until touched, so a wake-up pass focuses the window and re-walks. A partial tree is never evidence that the UI is stuck.</p>
+          </div>
+          <div class="card">
+            <div class="num">TARGET</div>
+            <h3>Text goes into text fields</h3>
+            <p>When the goal contains text to type, only <code>AXTextField</code>, <code>AXTextArea</code>, <code>AXSearchField</code> and <code>AXComboBox</code> are candidates. Create/send controls fire at most once per task; if the screen already changed, the step is done regardless of Jev's confidence.</p>
+          </div>
+          <div class="card">
+            <div class="num">ACT</div>
+            <h3>Real events, grounded geometry</h3>
+            <p>Clicks use <code>AXPress</code>; if the element refuses and its frame is known, one real <code>CGEvent</code> click at the frame centre. Typing is in-process Unicode key events into the focused field. Nothing is ever aimed at a coordinate a model made up.</p>
+          </div>
+          <div class="card">
+            <div class="num">VERIFY</div>
+            <h3>Postconditions, not vibes</h3>
+            <p>Each action has its own check: the field contains the text, the element count changed, the prompt box emptied, a window appeared. Only a verified change yields "Done". If the step budget runs out but the goal is verifiably met, that's success — not a false failure.</p>
+          </div>
+          <div class="card">
+            <div class="num">HEAR</div>
+            <h3>Push-to-talk, no guessing</h3>
+            <p>Key-down starts the on-device engine, key-up finalizes. Toggle mode keeps a silence timer with a Jev <code>complete?</code> judgment on top (≥0.75 finalize now, ≤0.35 keep listening). Only one analyzer may own the audio stream; restarts are serialized so each utterance finalizes exactly once.</p>
+          </div>
+          <div class="card">
+            <div class="num">FAIL</div>
+            <h3>Fail clearly, fast</h3>
+            <p>Every run has a 90 s wall clock; fallbacks have 6 steps / 30 s. When the ladder is exhausted the app says why — "I can't see a text box in Devin", "Allow Jev Voice to control System Events" — instead of guessing or pretending.</p>
+          </div>
+        </div>
+
+        <p class="eyebrow" style="margin-top:40px" data-reveal>when Jev says <code>stuck</code></p>
+        <div class="ladder" data-reveal>
+          <div class="rung"><div class="k">1</div><b>Full re-observe</b><p>4 s walk, no interactive-count requirement. Most "stuck" cases end here.</p></div>
+          <div class="rung"><div class="k">2</div><b>Wake the tree</b><p>Focus the window and re-walk — Electron trees grow from ~30 to ~600 elements.</p></div>
+          <div class="rung"><div class="k">3</div><b>OCR</b><p>Apple Vision reads visible labels with positions; Jev picks among them like any element.</p></div>
+          <div class="rung"><div class="k">4</div><b>Chrome DevTools / DeepSeek</b><p>DOM via CDP for Chromium windows; a tool-calling planner with a scaled screenshot as last resort, capped.</p></div>
+          <div class="rung"><div class="k">5</div><b>Clear failure</b><p>A spoken reason and the log line that explains it. Never a silent "Done".</p></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ SAFETY ============ -->
+    <section class="section" id="safety">
+      <div class="wrap">
+        <p class="eyebrow" data-reveal>04 / Safety</p>
+        <h2 data-reveal>Policy is data, confirmation is context-aware</h2>
+        <p class="section-sub" data-reveal><code>policy.json</code> ships with the app and can be overridden in Application Support. Blocked patterns never run. Confirmation words ask a spoken yes/no — and know whether you're inside an app or on the public web.</p>
+        <div class="policy" data-reveal>
+          <div class="card">
+            <h3>Always</h3>
+            <ul>
+              <li class="block">shell / terminal commands, credential and payment phrases, irreversible file operations — refused</li>
+              <li class="ask">delete · remove · empty trash · publish · pay — ask first</li>
+              <li class="ask">controls labelled delete, uninstall, shut down, pay… — ask before pressing, even if you didn't say the word</li>
+              <li>generated scripts (learned tools) must compile, pass the policy scan and a Jev review, and are previewed aloud</li>
+            </ul>
+          </div>
+          <div class="card">
+            <h3>Only in a browser</h3>
+            <ul>
+              <li class="ask">send · submit · post · tweet · reply — ask when the target is a website or a browser</li>
+              <li>the same words inside Devin, cmux or Notes run immediately — "send the prompt" needs no yes/no</li>
+              <li>in hold mode the answer is your next held utterance or the popover's Yes/No; the mic never opens unasked</li>
+              <li>what leaves the Mac: transcript + routing context to <code>api.typesafe.ai</code>; a scaled screenshot to DeepSeek only if the fallback is entered</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ INSTALL ============ -->
+    <section class="section" id="install">
+      <div class="wrap">
+        <p class="eyebrow" data-reveal>05 / Install</p>
+        <h2 data-reveal>Homebrew, then a TypeSafe key</h2>
+        <div class="install-grid" data-reveal>
+          <div class="card">
+            <h3>Install</h3>
+            <pre><code>brew tap chris-wozniczek/jev-voice https://github.com/chris-wozniczek/jev-voice-control
+brew install --cask jev-voice
+open "/Applications/Jev Voice.app"</code></pre>
+            <p style="margin-top:12px">Homebrew 7+ may ask you to <code>brew trust chris-wozniczek/jev-voice</code> first. Then paste your TypeSafe API key in the popover's Settings (gear icon). macOS 26 is recommended for the streaming speech engine; older macOS falls back to the classic Apple recognizer or Whisper.</p>
+            <h3 style="margin-top:22px">Build from source</h3>
+            <pre><code>make app    # build/Jev Voice.app (ad-hoc signed)
+make test   # 200+ unit tests on the pure logic
+make dist   # zip + sha256</code></pre>
+          </div>
+          <div class="card">
+            <h3>Permissions it asks for</h3>
+            <ul class="perm">
+              <li><span>Microphone</span><span>hear you</span></li>
+              <li><span>Speech Recognition</span><span>on-device transcription</span></li>
+              <li><span>Accessibility</span><span>read controls, click, type</span></li>
+              <li><span>Screen Recording</span><span>OCR fallback only</span></li>
+              <li><span>Automation · System Events</span><span>volume, dark mode, scripts</span></li>
+            </ul>
+            <h3 style="margin-top:22px">Debug</h3>
+            <pre><code>log show --last 5m --info \
+  --predicate 'subsystem == "com.chriswozniczek.jevvoice"'</code></pre>
+            <p style="margin-top:10px">Look for <code>stage=axtree elements= partial=</code>, <code>stage=ocr</code>, <code>stage=click</code>, <code>outcome=</code>.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <div class="wrap footer-inner">
+      <div>Jev Voice · MIT License · © 2026 Chris Wozniczek</div>
+      <div class="footer-links">
+        <a href="https://github.com/chris-wozniczek/jev-voice-control">GitHub</a>
+        <a href="https://github.com/chris-wozniczek/jev-voice-control/blob/main/DESIGN.md">Design doc</a>
+        <a href="https://github.com/chris-wozniczek/jev-voice-control/releases">Releases</a>
+        <a href="https://typesafe.ai">TypeSafe Jev</a>
+        <a href="https://x.com/chris_wozniczek">@chris_wozniczek</a>
+      </div>
+    </div>
+  </footer>
+
+  <script src="js/main.js" defer></script>
+</body>
+</html>

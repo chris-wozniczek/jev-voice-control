@@ -5,6 +5,13 @@ A macOS menu-bar app that turns spoken commands into actions using
 — a System One model that returns *typed decisions with probabilities* instead of
 generated text.
 
+**v0.9.1** is a public reliability release. Hold **⌥Space** to speak and
+release it to send the command. Toggle mode is available in Settings when you
+prefer to start and stop listening with a press.
+
+Useful links: [Design](DESIGN.md) ·
+[documentation site](https://chris-wozniczek.github.io/jev-voice-control/)
+
 Press **⌥Space**, say something, and Jev decides what to do:
 
 - "open chrome and go to google.com"
@@ -26,8 +33,11 @@ Mixed commands combine deterministic local actions with Jev-guided UI work:
 keeps those typed decisions in order, carries the opened app forward as the UI
 task target, and asks for confirmation before actions that sound hard to undo.
 
-Speech is transcribed **on-device** (SFSpeechRecognizer). Only the transcript is
-sent to the Jev API.
+Speech is transcribed **on-device**. SpeechAnalyzer streaming is the default
+engine on macOS 26 when it is available and compiled into the build; Whisper
+and the classic Apple speech recognizer are available alternatives in Settings
+› Hearing. The transcript and the small amount of app context needed for
+routing—such as the frontmost app and installed app names—are sent to Jev.
 
 Typing activates the target app before every keystroke path and reads the
 focused field back after typing. If the field does not show the text, Jev uses
@@ -48,20 +58,21 @@ Apple streaming requires Swift 6.2+/Xcode 26; check a built binary with
 
 ### How it decides
 
-Jev first interprets deterministic local commands, then picks the next action
-from the live accessibility elements on screen. DeepSeek Flash is an optional
-fallback for open-ended tasks or screens without accessible controls.
-Goal words rank matching controls ahead of unrelated settings, while a newly
-opened Settings, Preferences, or About surface is detected and closed so the
-request can continue on the original window.
+The decision flow is deliberately layered:
 
-Computer use settings let you choose the Jev step planner or DeepSeek Flash,
-and control DeepSeek thinking (off, low, or high). Sparse Accessibility trees
-are re-walked after a focus or scroll poke, and Jev requests one OCR pass when
-it is stuck. Submit goals try Command-Return and Return with post-key
-verification before entering the planner loop. In Jev mode, the DeepSeek key
-is optional and is only used for fallback; the Computer use settings expose
-the maximum fallback steps and seconds.
+1. The local parser handles deterministic commands and extracts slots.
+2. Jev routes ambiguous clauses and returns typed action decisions.
+3. The fast path handles known app/site actions when their preconditions match.
+4. The computer-use path observes the target application's Accessibility tree.
+5. Jev picks an element, Jev Voice acts on it, then re-observes and verifies the
+   result.
+
+The bounded fallbacks are a wake-up rewalk for lazy Accessibility trees, local
+OCR for visible controls, Chrome DevTools Protocol for thin Chromium/Electron
+trees, and DeepSeek for open-ended or escalated planner work. Text entry starts
+with in-process Unicode keyboard events and uses the verified Cua path when
+needed. DeepSeek thinking and the fallback step/time budgets are configurable
+in Computer use settings.
 
 ### Learned tools
 
@@ -110,14 +121,16 @@ and Reply controls require confirmation before submission.
 ### Safety policy
 
 The bundled `Resources/policy.json` blocks shell, payment, credential, and
-irreversible file-operation phrases, and asks for confirmation before send,
-submit, post, publish, tweet, reply, delete, remove, or empty-trash commands.
+irreversible file-operation phrases. Its `confirm` defaults are `delete`,
+`remove`, `empty trash`, `publish`, and `pay`; its browser-only
+`confirmInBrowser` defaults are `send`, `submit`, `post`, `tweet`, and `reply`.
+The browser list is applied only when the target is a browser/site workflow.
 A user override at
 `~/Library/Application Support/Jev Voice/policy.json` replaces the bundled
 policy. Settings › Safety shows the loaded policy and can open or reveal it.
 
 ```
-microphone ──> SFSpeechRecognizer (on-device) ──> transcript
+microphone ──> SpeechAnalyzer / Apple Speech / Whisper (on-device) ──> transcript
                                                       │
                                           ClauseSplitter (multi-verb clauses)
                                           │
@@ -131,8 +144,9 @@ microphone ──> SFSpeechRecognizer (on-device) ──> transcript
                               Executor (NSWorkspace / CGEvent / osascript / pmset)
 ```
 
-Jev never produces free text — each clause is one `systemOne` call with a state
-payload (`clause`, `full_transcript`, `frontmost_app`, `installed_apps`) and six
+Jev's routing answers are typed and never free text — each clause is one
+`systemOne` call with a state
+payload (`clause`, `full_transcript`, `frontmost_app`, `installed_apps`, `aliases`) and seven
 questions:
 
 | question | type | shape |
@@ -190,8 +204,9 @@ defaults write com.chriswozniczek.jevvoice typesafeAPIKey <key>
 
 - **Microphone** — hear commands
 - **Speech Recognition** — transcribe (on-device when supported)
-- **Accessibility** — required for the Cmd+V paste used by dictation
-- **Automation** — required for `osascript` volume/brightness actions
+- **Accessibility** — inspect and act on application controls and type text
+- **Screen Recording** — capture the screen for local OCR and screenshots
+- **Automation (System Events)** — control System Events for AppleScript actions
 
 ### Teaching Jev app shortcuts
 
@@ -247,6 +262,14 @@ Inspect recent Jev Voice logs with:
 log show --last 5m --predicate 'subsystem == "com.chriswozniczek.jevvoice"' --info
 ```
 
+Useful structured log keys include:
+
+- `stage=axtree elements=... partial=...`
+- `stage=ocr`
+- `stage=click`
+- `outcome=...`
+- `analyzer final=...`
+
 The step list includes a **Clear** button for removing completed local steps.
 
 ## Limitations
@@ -261,5 +284,10 @@ The step list includes a **Clear** button for removing completed local steps.
 ## Privacy
 
 - Speech recognition runs on-device (`requiresOnDeviceRecognition` when supported).
-- Only the transcript, frontmost app name, and installed app list are sent to
-  `api.typesafe.ai`. Your API key stays in local `UserDefaults`.
+- The transcript, frontmost app name, installed app list, and configured app
+  aliases are sent to `api.typesafe.ai` when routing requires Jev. Your API key
+  stays in local `UserDefaults`.
+
+## License
+
+Jev Voice is available under the [MIT License](LICENSE).
