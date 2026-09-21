@@ -119,12 +119,8 @@ final class SpeechAnalyzerEngine: SpeechEngine {
             guard let self else { return }
             do {
                 try await analyzer.finalizeAndFinishThroughEndOfInput()
-                guard !self.didEmitFinal else { return }
-                self.didEmitFinal = true
-                self.onFinal?(Self.assembleFinal(
-                    finalized: self.finalized,
-                    volatile: self.volatile
-                ))
+                await self.waitForTranscriber(timeout: .milliseconds(1_500))
+                self.emitFinalIfNeeded()
             } catch {
                 self.onError?(error)
             }
@@ -240,6 +236,9 @@ final class SpeechAnalyzerEngine: SpeechEngine {
                         )
                     }
                 }
+                if let self, self.generation == generation, self.finishing {
+                    self.emitFinalIfNeeded()
+                }
             } catch {
                 guard let self, self.generation == generation else { return }
                 self.onError?(error)
@@ -347,6 +346,29 @@ final class SpeechAnalyzerEngine: SpeechEngine {
         guard !didSignalSilence else { return }
         didSignalSilence = true
         onSilence?()
+    }
+
+    private func emitFinalIfNeeded() {
+        guard !didEmitFinal else { return }
+        didEmitFinal = true
+        onFinal?(Self.assembleFinal(
+            finalized: finalized,
+            volatile: volatile
+        ))
+    }
+
+    private func waitForTranscriber(timeout: Duration) async {
+        guard let transcriberTask else { return }
+        await withTaskGroup(of: Void.self) { group in
+            group.addTask {
+                _ = await transcriberTask.value
+            }
+            group.addTask {
+                try? await Task.sleep(for: timeout)
+            }
+            _ = await group.next()
+            group.cancelAll()
+        }
     }
 
     private func startFallbackSilenceTimer(generation: Int) {
