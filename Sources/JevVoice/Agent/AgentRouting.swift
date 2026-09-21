@@ -41,12 +41,15 @@ extension VoiceController {
             : !config.deepSeekAPIKey.isEmpty
     }
 
-    func agentFallback(transcript: String) async {
+    func agentFallback(transcript: String, preConfirmed: Bool = false) async {
         status = .executing
         onListeningChanged?(false)
         let outcome = await AgentRunner.shared.run(
             goal: transcript,
-            context: AgentContext(frontmostApp: lastExternalFrontmostApp)
+            context: AgentContext(
+                frontmostApp: lastExternalFrontmostApp,
+                preConfirmed: preConfirmed
+            )
         )
         switch outcome {
         case .done(let summary):

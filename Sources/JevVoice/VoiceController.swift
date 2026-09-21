@@ -38,6 +38,7 @@ final class VoiceController: ObservableObject {
     private var startTask: Task<Void, Never>?
     private var confirmationTimeoutTask: Task<Void, Never>?
     private var preConfirmedExecution = false
+    private var pendingConfirmedRun: (() async -> Void)?
     private var taskStartedAt: Date?
     private var frontmostObserver: NSObjectProtocol?
     private(set) var lastExternalFrontmostApp: String?
@@ -271,9 +272,12 @@ final class VoiceController: ObservableObject {
         )
         Log.command.info("verdict=\(String(describing: verdict), privacy: .public)")
         let policyVerdict = config.safetyPolicy?.verdict(for: text)
-        let routesToAgent = policyVerdict == nil && shouldUseComputerAgent(
+        var routesToAgent = shouldUseComputerAgent(
             transcript: text, decisions: decisions, verdict: verdict, error: interpretationError
         )
+        if case .reject = policyVerdict {
+            routesToAgent = false
+        }
         Log.command.info("route=\(routesToAgent ? "agent" : "local", privacy: .public)")
         if !routesToAgent,
            !decisions.contains(where: { $0.action != .none }),
@@ -281,7 +285,15 @@ final class VoiceController: ObservableObject {
             return
         }
         if routesToAgent {
-            await agentFallback(transcript: text)
+            if case .confirm(let reason) = verdict {
+                pendingConfirmedRun = { [weak self] in
+                    await self?.agentFallback(transcript: text, preConfirmed: true)
+                }
+                preConfirmedExecution = true
+                await requestVoiceConfirmation(reason: reason)
+            } else {
+                await agentFallback(transcript: text)
+            }
             return
         }
         if let interpretationError {
@@ -295,6 +307,7 @@ final class VoiceController: ObservableObject {
         case .run:
             await executeAll()
         case .confirm(let reason):
+            pendingConfirmedRun = nil
             preConfirmedExecution = true
             await requestVoiceConfirmation(reason: reason)
         case .reject(let reason):
@@ -484,6 +497,12 @@ final class VoiceController: ObservableObject {
         confirmationTimeoutTask?.cancel()
         awaitingVoiceAnswer = false
         recognizer.stop()
+        if let pendingConfirmedRun {
+            self.pendingConfirmedRun = nil
+            preConfirmedExecution = false
+            await pendingConfirmedRun()
+            return
+        }
         let preConfirmed = preConfirmedExecution
         preConfirmedExecution = false
         await executeAll(preConfirmed: preConfirmed)
@@ -498,6 +517,7 @@ final class VoiceController: ObservableObject {
         confirmationTimeoutTask = nil
         awaitingVoiceAnswer = false
         preConfirmedExecution = false
+        pendingConfirmedRun = nil
         recognizer.stop()
         guard status == .awaitingConfirm || status == .listening else { return }
         decisions = []
