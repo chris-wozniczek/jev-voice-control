@@ -17,9 +17,11 @@ enum SpeechEngineKind: String, CaseIterable {
     }
 
     static var streamingAvailable: Bool {
+#if swift(>=6.2)
         if #available(macOS 26, *) {
             return SpeechTranscriber.isAvailable
         }
+#endif
         return false
     }
 }
@@ -210,7 +212,7 @@ final class Config: ObservableObject {
            let speechEngine = SpeechEngineKind(rawValue: storedSpeechEngine) {
             self.speechEngine = speechEngine
         } else {
-            if #available(macOS 26, *), SpeechTranscriber.isAvailable {
+            if SpeechEngineKind.streamingAvailable {
                 self.speechEngine = .defaultKind(streamingAvailable: true)
             } else {
                 self.speechEngine = .defaultKind(streamingAvailable: false)

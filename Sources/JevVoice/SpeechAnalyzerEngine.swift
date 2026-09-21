@@ -3,6 +3,7 @@ import Foundation
 import Speech
 import JevVoiceCore
 
+#if swift(>=6.2)
 @available(macOS 26.0, *)
 @MainActor
 final class SpeechAnalyzerEngine: SpeechEngine {
@@ -422,7 +423,54 @@ final class SpeechAnalyzerEngine: SpeechEngine {
         status?(nil)
     }
 }
+#else
+@MainActor
+final class SpeechAnalyzerEngine: SpeechEngine {
+    var onPartial: ((String) -> Void)?
+    var onFinal: ((String) -> Void)?
+    var onError: ((Error) -> Void)?
+    var onListening: (() -> Void)?
+    var onSilence: (() -> Void)?
+    var onStatus: ((String?) -> Void)?
+    var vocabulary: [String] = []
 
+    static var streamingAvailable: Bool { false }
+    static func preload() {}
+
+    private var fallback: AppleSpeechEngine?
+
+    func start() throws {
+        let fallback = AppleSpeechEngine()
+        fallback.onPartial = onPartial
+        fallback.onFinal = onFinal
+        fallback.onError = onError
+        fallback.onListening = onListening
+        fallback.onSilence = onSilence
+        fallback.onStatus = onStatus
+        fallback.vocabulary = vocabulary
+        self.fallback = fallback
+        try fallback.start()
+    }
+
+    func finish() {
+        fallback?.finish()
+    }
+
+    func cancel() {
+        fallback?.cancel()
+        fallback = nil
+    }
+
+    nonisolated static func assembleFinal(finalized: String, volatile: String) -> String {
+        [finalized, volatile]
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
+    }
+}
+#endif
+
+#if swift(>=6.2)
 @available(macOS 26.0, *)
 @MainActor
 final class SpeechAnalyzerModelStore {
@@ -469,3 +517,12 @@ final class SpeechAnalyzerModelStore {
         SpeechRecognizer.builtInVocabulary
     }
 }
+#else
+@MainActor
+final class SpeechAnalyzerModelStore {
+    static let shared = SpeechAnalyzerModelStore()
+
+    func preload() {}
+    func waitForPreload() async {}
+}
+#endif
