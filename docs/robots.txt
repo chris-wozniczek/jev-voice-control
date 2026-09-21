@@ -1,0 +1,3 @@
+User-agent: *
+Allow: /
+Sitemap: https://chris-wozniczek.github.io/jev-voice-control/sitemap.xml
