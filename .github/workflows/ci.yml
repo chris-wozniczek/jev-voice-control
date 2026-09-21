@@ -29,5 +29,10 @@ jobs:
           xcodebuild -version
       - name: Build
         run: swift build
+      - name: Verify SpeechAnalyzer engine compiled in
+        run: |
+          ENGINE_INFO="$(".build/debug/JevVoice" --engine-info)"
+          echo "$ENGINE_INFO"
+          echo "$ENGINE_INFO" | grep -q 'streamingCompiledIn=true' || exit 1
       - name: Test
         run: swift test

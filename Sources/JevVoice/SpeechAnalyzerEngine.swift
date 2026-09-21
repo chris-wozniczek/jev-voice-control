@@ -3,7 +3,7 @@ import Foundation
 import Speech
 import JevVoiceCore
 
-#if swift(>=6.2)
+#if compiler(>=6.2)
 @available(macOS 26.0, *)
 @MainActor
 final class SpeechAnalyzerEngine: SpeechEngine {
@@ -477,6 +477,7 @@ final class SpeechAnalyzerEngine: SpeechEngine {
     private var fallback: AppleSpeechEngine?
 
     func start() throws {
+        Log.speech.info("analyzer not compiled fallback=apple")
         let fallback = AppleSpeechEngine()
         fallback.onPartial = onPartial
         fallback.onFinal = onFinal
@@ -509,7 +510,7 @@ final class SpeechAnalyzerEngine: SpeechEngine {
 }
 #endif
 
-#if swift(>=6.2)
+#if compiler(>=6.2)
 @available(macOS 26.0, *)
 @MainActor
 final class SpeechAnalyzerModelStore {

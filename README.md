@@ -41,6 +41,8 @@ selected, its model is loaded at app launch so the first tap can start listening
 immediately. Whisper uses audio energy to detect the end of speech. Smart end
 of speech can ask Jev whether a short pause ends the command, while retaining
 the configured silence timeout as a hard cap.
+Apple streaming requires Swift 6.2+/Xcode 26; check a built binary with
+`--engine-info`.
 
 ## How it works
 

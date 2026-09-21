@@ -352,7 +352,11 @@ struct SettingsView: View {
                         }
                     }
                 }
-                if !SpeechEngineKind.streamingAvailable {
+                if !SpeechEngineKind.streamingCompiledIn {
+                    Text("Apple streaming is not compiled into this build")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else if !SpeechEngineKind.streamingAvailable {
                     Text("Apple streaming is unavailable on this macOS")
                         .font(.caption)
                         .foregroundStyle(.secondary)
