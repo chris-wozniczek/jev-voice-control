@@ -282,51 +282,6 @@ public enum ClauseSplitter {
         let payloadBoundary = payloadStart(in: transcript)
 
         var splitLocations: [(start: Int, resume: Int)] = []
-        for index in 0..<ns.length {
-            let character = ns.substring(with: NSRange(location: index, length: 1)).first!
-            guard ",;.".contains(character),
-                  payloadBoundary.map({ index < $0 }) ?? true else { continue }
-            var resume = index + 1
-            while resume < ns.length,
-                  ns.substring(with: NSRange(location: resume, length: 1))
-                    .first?.isWhitespace == true {
-                resume += 1
-            }
-            guard resume < ns.length else { continue }
-            var wordEnd = resume
-            while wordEnd < ns.length,
-                  ns.substring(with: NSRange(location: wordEnd, length: 1))
-                    .first?.isLetter == true {
-                wordEnd += 1
-            }
-            let nextWord = ns.substring(with: NSRange(
-                location: resume,
-                length: wordEnd - resume
-            )).lowercased()
-            if commandVerbs.contains(nextWord) {
-                splitLocations.append((start: index, resume: resume))
-            } else if ["and", "then"].contains(nextWord) {
-                var commandStart = wordEnd
-                while commandStart < ns.length,
-                      ns.substring(with: NSRange(location: commandStart, length: 1))
-                        .first?.isWhitespace == true {
-                    commandStart += 1
-                }
-                var commandEnd = commandStart
-                while commandEnd < ns.length,
-                      ns.substring(with: NSRange(location: commandEnd, length: 1))
-                        .first?.isLetter == true {
-                    commandEnd += 1
-                }
-                let command = ns.substring(with: NSRange(
-                    location: commandStart,
-                    length: commandEnd - commandStart
-                )).lowercased()
-                if commandVerbs.contains(command) {
-                    splitLocations.append((start: index, resume: commandStart))
-                }
-            }
-        }
         for match in matches {
             if let payloadBoundary, match.range.location >= payloadBoundary {
                 continue

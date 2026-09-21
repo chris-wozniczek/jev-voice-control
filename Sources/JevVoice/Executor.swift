@@ -274,7 +274,9 @@ enum Executor {
            TextEntry.focusedTextInput(pid: pid) == nil {
             return noFocusedFieldMessage
         }
-        let beforeSnapshot = AXTreeReader.snapshot(pid: Int(pid), windowFrame: nil)?.snapshot
+        let beforeSnapshot = await Task.detached(priority: .userInitiated) {
+            AXTreeReader.snapshot(pid: Int(pid), windowFrame: nil)?.snapshot
+        }.value
         let pasteboard = NSPasteboard.general
         let saved: [NSPasteboardItem] = (pasteboard.pasteboardItems ?? []).map { item in
             let copy = NSPasteboardItem()
@@ -312,7 +314,7 @@ enum Executor {
         case .missing:
             Log.agent.info("type readback=miss")
         }
-        if snapshotDiffConfirmsTyping(
+        if await snapshotDiffConfirmsTyping(
             before: beforeSnapshot,
             pid: Int(pid),
             text: text
@@ -329,7 +331,7 @@ enum Executor {
             Log.agent.info("type readback=unobservable (unverified)")
             return "Typed \"\(text)\""
         case .missing:
-            if snapshotDiffConfirmsTyping(
+            if await snapshotDiffConfirmsTyping(
                 before: beforeSnapshot,
                 pid: Int(pid),
                 text: text
@@ -346,9 +348,11 @@ enum Executor {
         before: CuaSnapshot?,
         pid: Int,
         text: String
-    ) -> Bool {
+    ) async -> Bool {
         guard let before,
-              let after = AXTreeReader.snapshot(pid: pid, windowFrame: nil)?.snapshot else {
+              let after = await Task.detached(priority: .userInitiated, operation: {
+                  AXTreeReader.snapshot(pid: pid, windowFrame: nil)?.snapshot
+              }).value else {
             return false
         }
         if before.elements.count != after.elements.count {

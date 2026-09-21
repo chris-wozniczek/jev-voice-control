@@ -38,6 +38,7 @@ final class SpeechAnalyzerEngine: SpeechEngine {
     private var transcriberTask: Task<Void, Never>?
     private var detectorTask: Task<Void, Never>?
     private var finishTask: Task<Void, Never>?
+    private var finalSilenceTask: Task<Void, Never>?
     private var fallback: AppleSpeechEngine?
     private var finalized = ""
     private var volatile = ""
@@ -115,6 +116,8 @@ final class SpeechAnalyzerEngine: SpeechEngine {
         finishing = true
         fallbackSilenceTask?.cancel()
         fallbackSilenceTask = nil
+        finalSilenceTask?.cancel()
+        finalSilenceTask = nil
         guard let analyzer else {
             if setupTask != nil {
                 Log.speech.info("analyzer finish queued while setup loads")
@@ -160,6 +163,8 @@ final class SpeechAnalyzerEngine: SpeechEngine {
         detectorTask = nil
         finishTask?.cancel()
         finishTask = nil
+        finalSilenceTask?.cancel()
+        finalSilenceTask = nil
         fallbackSilenceTask?.cancel()
         fallbackSilenceTask = nil
         fallback?.cancel()
@@ -234,8 +239,9 @@ final class SpeechAnalyzerEngine: SpeechEngine {
                 for try await result in transcriber.results {
                     guard let self, self.generation == generation else { return }
                     let text = String(result.text.characters)
-                    let silenceSinceSpeech = Date().timeIntervalSince(self.lastSpeechAt)
                     if !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        self.finalSilenceTask?.cancel()
+                        self.finalSilenceTask = nil
                         self.lastSpeechAt = Date()
                         self.didSignalPause = false
                         self.silenceTimeoutOverride = nil
@@ -250,10 +256,21 @@ final class SpeechAnalyzerEngine: SpeechEngine {
                         Log.speech.info(
                             "analyzer final=\(text, privacy: .public) elapsed=\(Date().timeIntervalSince(self.lastAudioAt), privacy: .public)"
                         )
-                        if Config.shared.listeningMode == .toggle,
-                           silenceSinceSpeech >= 0.4 {
-                            Log.speech.info("analyzer final-triggered silence")
-                            self.signalSilence()
+                        if Config.shared.listeningMode == .toggle {
+                            self.finalSilenceTask?.cancel()
+                            self.finalSilenceTask = Task { @MainActor [weak self] in
+                                do {
+                                    try await Task.sleep(for: .milliseconds(600))
+                                } catch {
+                                    return
+                                }
+                                guard let self,
+                                      self.generation == generation,
+                                      !self.finishing else { return }
+                                Log.speech.info("analyzer final-triggered silence")
+                                self.signalSilence()
+                                self.finalSilenceTask = nil
+                            }
                         }
                     } else {
                         self.volatile = text

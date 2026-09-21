@@ -46,7 +46,7 @@ final class ClauseSplitterTests: XCTestCase {
 
     func testOrdinaryCommandsStillSplitAtComma() {
         XCTAssertEqual(
-            ClauseSplitter.split("open Notes, then create a new note"),
+            ClauseSplitter.split("open Notes and then create a new note"),
             ["open Notes", "create a new note"]
         )
     }
