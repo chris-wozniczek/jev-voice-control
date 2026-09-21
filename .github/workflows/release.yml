@@ -9,12 +9,29 @@ permissions:
 
 jobs:
   release:
-    runs-on: macos-15
+    runs-on: macos-26
     steps:
       - uses: actions/checkout@v4
         with:
           ref: main
           fetch-depth: 0
+      - name: Select newest Xcode 26
+        shell: bash
+        run: |
+          candidates=()
+          for candidate in /Applications/Xcode_26.*.app; do
+            if [ -d "$candidate" ]; then
+              candidates+=("$candidate")
+            fi
+          done
+          if [ "${#candidates[@]}" -gt 0 ]; then
+            xcode="$(printf '%s\n' "${candidates[@]}" | sort -V | tail -n 1)"
+            sudo xcode-select -s "$xcode"
+            echo "Selected Xcode: $xcode"
+          else
+            echo "No Xcode_26.*.app found; retaining the current Xcode"
+          fi
+          xcodebuild -version
 
       - name: Check tag matches Info.plist version
         run: |
@@ -27,6 +44,11 @@ jobs:
 
       - name: Build app and zip
         run: make dist
+
+      - name: Verify SpeechAnalyzer Swift toolchain
+        run: |
+          swift -version
+          swift -version 2>&1 | grep -Eq 'Swift version 6\.([2-9]|[1-9][0-9])|Swift version [7-9]' || exit 1
 
       - name: Compute checksum
         run: echo "SHA256=$(shasum -a 256 "build/Jev-Voice-${VERSION}.zip" | cut -d' ' -f1)" >> "$GITHUB_ENV"
